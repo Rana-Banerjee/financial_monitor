@@ -3,7 +3,34 @@
 import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
-type PropertyType = 'residential' | 'commercial' | 'plot' | 'under_construction';
+type PropertyType = 'residential' | 'commercial' | 'plot';
+
+type PropertyStatus = 'ready_to_move_in' | 'under_construction';
+
+type PaidBy = 'individual' | 'bank';
+
+type OtherAssetType = 'bank_account' | 'ppf' | 'epf' | 'stocks' | 'mutual_fund';
+
+type OtherLiabilityType = 'personal_loan' | 'deposits';
+
+interface OtherAsset {
+  id: string;
+  asset_type: OtherAssetType | '';
+  name: string;
+  amount: number;
+  return_rate: number;
+  included: boolean;
+  is_liquid: boolean;
+}
+
+interface OtherLiability {
+  id: string;
+  liability_type: OtherLiabilityType | '';
+  name: string;
+  amount: number;
+  interest_rate: number;
+  included: boolean;
+}
 
 interface Loan {
   principal: number;
@@ -12,6 +39,10 @@ interface Loan {
   emi_amount: number;
   start_date: string | null;
   pre_emi: boolean;
+  overdraft_account: {
+    overdraft_amount: number;
+    impact_type: string;
+  } | null;
 }
 
 interface CashflowSchedule {
@@ -29,18 +60,42 @@ interface Event {
   description: string | null;
 }
 
+interface InstallmentDetail {
+  id: string;
+  name: string;
+  amount: number;
+  date: string;
+  paid_by: PaidBy;
+  is_interest: boolean;
+  is_completed: boolean;
+}
+
+interface OtherExpense {
+  id: string;
+  name: string;
+  amount: number;
+  date: string;
+  paid_by: PaidBy;
+  is_completed: boolean;
+}
+
 interface Property {
   id: number;
   name: string;
   property_type: PropertyType;
+  property_status: PropertyStatus;
   purchase_date: string | null;
   possession_date: string | null;
   purchase_price: number;
   current_valuation: number;
+  appreciation_rate: number;
   is_primary_residence: boolean;
+  last_updated: string | null;
   loan: Loan | null;
   cashflow_schedules: CashflowSchedule[];
   events: Event[];
+  installments: InstallmentDetail[];
+  other_expenses: OtherExpense[];
 }
 
 interface CashflowRow {
@@ -54,10 +109,12 @@ interface CashflowRow {
 interface FormData {
   name: string;
   property_type: PropertyType;
+  property_status: PropertyStatus;
   purchase_date: string;
   possession_date: string;
   purchase_price: number;
   current_valuation: number;
+  appreciation_rate: number;
   is_primary_residence: boolean;
   loan_principal: number;
   loan_interest_rate: number;
@@ -65,8 +122,13 @@ interface FormData {
   loan_emi_amount: number;
   loan_start_date: string;
   has_loan: boolean;
+  has_overdraft: boolean;
+  overdraft_amount: number;
+  overdraft_impact_type: string;
   incomes: CashflowRow[];
   expenses: CashflowRow[];
+  installments: InstallmentDetail[];
+  other_expenses: OtherExpense[];
 }
 
 const createEmptyCashflowRow = (): CashflowRow => ({
@@ -77,13 +139,34 @@ const createEmptyCashflowRow = (): CashflowRow => ({
   start_date: '',
 });
 
+const createEmptyInstallment = (): InstallmentDetail => ({
+  id: Math.random().toString(36).substr(2, 9),
+  name: '',
+  amount: 0,
+  date: '',
+  paid_by: 'individual',
+  is_interest: false,
+  is_completed: false,
+});
+
+const createEmptyOtherExpense = (): OtherExpense => ({
+  id: Math.random().toString(36).substr(2, 9),
+  name: '',
+  amount: 0,
+  date: '',
+  paid_by: 'individual',
+  is_completed: false,
+});
+
 const initialFormData: FormData = {
   name: '',
   property_type: 'residential',
+  property_status: 'ready_to_move_in',
   purchase_date: '',
   possession_date: '',
   purchase_price: 0,
   current_valuation: 0,
+  appreciation_rate: 0,
   is_primary_residence: false,
   loan_principal: 0,
   loan_interest_rate: 0,
@@ -91,8 +174,13 @@ const initialFormData: FormData = {
   loan_emi_amount: 0,
   loan_start_date: '',
   has_loan: false,
+  has_overdraft: false,
+  overdraft_amount: 0,
+  overdraft_impact_type: 'reduce_emi',
   incomes: [createEmptyCashflowRow()],
   expenses: [createEmptyCashflowRow()],
+  installments: [createEmptyInstallment()],
+  other_expenses: [createEmptyOtherExpense()],
 };
 
 export default function Home() {
@@ -101,6 +189,22 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'add' | 'view'>('view');
   const [editingPropertyId, setEditingPropertyId] = useState<number | null>(null);
+  const [timelineMonths, setTimelineMonths] = useState<12 | 24 | 120 | 240>(120);
+  const [excludedPropertyIds, setExcludedPropertyIds] = useState<number[]>([]);
+  const [deleteConfirmProperty, setDeleteConfirmProperty] = useState<{id: number; name: string} | null>(null);
+  const [otherAssets, setOtherAssets] = useState<OtherAsset[]>([
+    { id: '1', asset_type: 'bank_account', name: 'Bank Account', amount: 0, return_rate: 4, included: true, is_liquid: true },
+    { id: '2', asset_type: 'ppf', name: 'PPF', amount: 0, return_rate: 7, included: true, is_liquid: false },
+    { id: '3', asset_type: 'epf', name: 'EPF', amount: 0, return_rate: 8, included: true, is_liquid: false },
+    { id: '4', asset_type: 'stocks', name: 'Stocks', amount: 0, return_rate: 10, included: true, is_liquid: true },
+    { id: '5', asset_type: 'mutual_fund', name: 'Mutual Fund', amount: 0, return_rate: 12, included: true, is_liquid: true },
+  ]);
+  const [otherLiabilities, setOtherLiabilities] = useState<OtherLiability[]>([
+    { id: '1', liability_type: 'personal_loan', name: 'Personal Loan', amount: 0, interest_rate: 10, included: true },
+    { id: '2', liability_type: 'deposits', name: 'Deposits', amount: 0, interest_rate: 6, included: true },
+  ]);
+  const [showOtherAssetsModal, setShowOtherAssetsModal] = useState(false);
+  const [showInstallmentModal, setShowInstallmentModal] = useState(false);
 
   useEffect(() => {
     fetchProperties();
@@ -159,15 +263,17 @@ export default function Home() {
     const propertyData: any = {
       name: formData.name,
       property_type: formData.property_type,
+      property_status: formData.property_status,
       purchase_date: formData.purchase_date || null,
       possession_date: formData.possession_date || null,
       purchase_price: formData.purchase_price,
       current_valuation: formData.current_valuation,
+      appreciation_rate: formData.appreciation_rate,
       is_primary_residence: formData.is_primary_residence,
     };
 
     if (formData.has_loan && formData.loan_principal > 0) {
-      propertyData.loan = {
+      const loanData: any = {
         principal: formData.loan_principal,
         interest_rate: formData.loan_interest_rate,
         tenure_months: formData.loan_tenure_months,
@@ -175,6 +281,13 @@ export default function Home() {
         start_date: formData.loan_start_date || null,
         pre_emi: false,
       };
+      if (formData.has_overdraft && formData.overdraft_amount > 0) {
+        loanData.overdraft_account = {
+          overdraft_amount: formData.overdraft_amount,
+          impact_type: formData.overdraft_impact_type,
+        };
+      }
+      propertyData.loan = loanData;
     }
 
     propertyData.cashflow_schedules = [];
@@ -205,6 +318,33 @@ export default function Home() {
       }
     });
 
+    propertyData.installments = [];
+    formData.installments.forEach((inst) => {
+      if (inst.name && inst.amount > 0) {
+        propertyData.installments.push({
+          name: inst.name,
+          amount: inst.amount,
+          date: inst.date || null,
+          paid_by: inst.paid_by,
+          is_interest: inst.is_interest,
+          is_completed: inst.is_completed,
+        });
+      }
+    });
+
+    propertyData.other_expenses = [];
+    formData.other_expenses.forEach((exp) => {
+      if (exp.name && exp.amount > 0) {
+        propertyData.other_expenses.push({
+          name: exp.name,
+          amount: exp.amount,
+          date: exp.date || null,
+          paid_by: exp.paid_by,
+          is_completed: exp.is_completed,
+        });
+      }
+    });
+
     try {
       const url = editingPropertyId 
         ? `http://localhost:8000/properties/${editingPropertyId}`
@@ -222,6 +362,8 @@ export default function Home() {
           ...initialFormData,
           incomes: [createEmptyCashflowRow()],
           expenses: [createEmptyCashflowRow()],
+          installments: [createEmptyInstallment()],
+          other_expenses: [createEmptyOtherExpense()],
         });
         setEditingPropertyId(null);
         fetchProperties();
@@ -261,13 +403,18 @@ export default function Home() {
     if (incomes.length === 0) incomes.push(createEmptyCashflowRow());
     if (expenses.length === 0) expenses.push(createEmptyCashflowRow());
 
+    const installments = (property.installments || []).length > 0 ? property.installments : [createEmptyInstallment()];
+    const otherExpenses = (property.other_expenses || []).length > 0 ? property.other_expenses : [createEmptyOtherExpense()];
+
     setFormData({
       name: property.name,
       property_type: property.property_type,
+      property_status: property.property_status || 'ready_to_move_in',
       purchase_date: property.purchase_date || '',
       possession_date: property.possession_date || '',
       purchase_price: property.purchase_price,
       current_valuation: property.current_valuation,
+      appreciation_rate: property.appreciation_rate || 0,
       is_primary_residence: property.is_primary_residence,
       loan_principal: property.loan?.principal || 0,
       loan_interest_rate: property.loan?.interest_rate || 0,
@@ -275,19 +422,31 @@ export default function Home() {
       loan_emi_amount: property.loan?.emi_amount || 0,
       loan_start_date: property.loan?.start_date || '',
       has_loan: !!property.loan,
+      has_overdraft: !!property.loan?.overdraft_account,
+      overdraft_amount: property.loan?.overdraft_account?.overdraft_amount || 0,
+      overdraft_impact_type: property.loan?.overdraft_account?.impact_type || 'reduce_emi',
       incomes,
       expenses,
+      installments,
+      other_expenses: otherExpenses,
     });
     setEditingPropertyId(property.id);
     setActiveTab('add');
   };
 
   const handleDelete = async (propertyId: number) => {
-    if (!confirm('Are you sure you want to delete this property?')) return;
+    const property = properties.find(p => p.id === propertyId);
+    if (property) {
+      setDeleteConfirmProperty({ id: propertyId, name: property.name });
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirmProperty) return;
     
     setLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/properties/${propertyId}`, {
+      const res = await fetch(`http://localhost:8000/properties/${deleteConfirmProperty.id}`, {
         method: 'DELETE',
       });
       if (res.ok) {
@@ -297,79 +456,257 @@ export default function Home() {
       console.error('Failed to delete property:', err);
     }
     setLoading(false);
+    setDeleteConfirmProperty(null);
   };
 
-  const generateProjectionData = () => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const data = [];
-    const startYear = new Date().getFullYear();
+  const togglePropertyInclusion = (propertyId: number) => {
+    setExcludedPropertyIds((prev) =>
+      prev.includes(propertyId)
+        ? prev.filter((id) => id !== propertyId)
+        : [...prev, propertyId]
+    );
+  };
 
-    for (let i = 0; i < 180; i++) {
-      const year = Math.floor(i / 12);
-      const month = months[i % 12];
+  const addOtherAsset = () => {
+    const newAsset: OtherAsset = {
+      id: Math.random().toString(36).substr(2, 9),
+      asset_type: '',
+      name: '',
+      amount: 0,
+      return_rate: 0,
+      included: true,
+      is_liquid: true,
+    };
+    setOtherAssets([...otherAssets, newAsset]);
+  };
+
+  const removeOtherAsset = (id: string) => {
+    setOtherAssets(otherAssets.filter(a => a.id !== id));
+  };
+
+  const addOtherLiability = () => {
+    const newLiability: OtherLiability = {
+      id: Math.random().toString(36).substr(2, 9),
+      liability_type: '',
+      name: '',
+      amount: 0,
+      interest_rate: 0,
+      included: true,
+    };
+    setOtherLiabilities([...otherLiabilities, newLiability]);
+  };
+
+  const removeOtherLiability = (id: string) => {
+    setOtherLiabilities(otherLiabilities.filter(l => l.id !== id));
+  };
+
+  const generateProjectionData = (timelineMonths: number) => {
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const data = [];
+    const currentDate = new Date();
+    const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+    const startYear = currentDate.getFullYear();
+    const startMonth = currentDate.getMonth();
+
+    let cashInHand = 0;
+
+    let initialLiquidAssets = 0;
+    const propertyValuations: Record<number, number> = {};
+    const loanBalances: Record<number, number> = {};
+    const otherAssetValues: Record<string, number> = {};
+    otherAssets.forEach(a => {
+      if (a.included && a.is_liquid) {
+        initialLiquidAssets += a.amount;
+        otherAssetValues[a.id] = a.amount;
+      }
+    });
+    cashInHand += initialLiquidAssets;
+
+    properties.forEach(p => {
+      if (!excludedPropertyIds.includes(p.id) && p.loan) {
+        const paidInstallments = (p.installments || []).filter(inst => inst.is_completed && inst.paid_by === 'bank').length;
+        const totalDisbursed = (p.installments || []).reduce((sum, inst) => 
+          inst.is_completed && inst.paid_by === 'bank' ? sum + inst.amount : sum, 0
+        );
+        if (totalDisbursed > 0) {
+          loanBalances[p.id] = totalDisbursed;
+        } else {
+          loanBalances[p.id] = p.loan.principal;
+        }
+      }
+    });
+
+    const getMonthIndex = (date: Date) => {
+      return (date.getFullYear() - startYear) * 12 + (date.getMonth() - startMonth);
+    };
+
+    for (let i = 0; i < timelineMonths; i++) {
+      const projectionDate = new Date(startYear, startMonth + i, 1);
+      const year = Math.floor((startMonth + i) / 12);
+      const month = monthNames[(startMonth + i) % 12];
       const label = `${month} ${startYear + year}`;
 
-      let totalAssets = 0;
-      let totalLiabilities = 0;
-      let totalIncome = 0;
-      let totalExpenses = 0;
-      let cashInHand = 0;
+      let monthlyIncome = 0;
+      let monthlyExpenses = 0;
+      let monthlyAssets = 0;
+      let monthlyLiabilities = 0;
 
       properties.forEach((p) => {
-        const purchaseDate = p.purchase_date ? new Date(p.purchase_date) : null;
-        const monthsSincePurchase = purchaseDate ? Math.floor((new Date().getTime() - purchaseDate.getTime()) / (30 * 24 * 60 * 60 * 1000)) : 0;
-        
-        if (i >= monthsSincePurchase || !purchaseDate) {
-          const appreciation = p.current_valuation * 0.05 * (i / 180);
-          totalAssets += p.current_valuation + appreciation;
-        }
+        if (excludedPropertyIds.includes(p.id)) return;
+
+        const appreciationRate = (p.appreciation_rate || 0) / 100 / 12;
+        const prevValuation = propertyValuations[p.id] || p.current_valuation;
+        const newValuation = prevValuation * (1 + appreciationRate);
+        propertyValuations[p.id] = newValuation;
+        monthlyAssets += newValuation;
 
         if (p.loan && p.loan.principal > 0) {
-          const loanStart = p.loan.start_date ? new Date(p.loan.start_date) : null;
-          const monthsSinceLoan = loanStart ? Math.floor((new Date().getTime() - loanStart.getTime()) / (30 * 24 * 60 * 60 * 1000)) : 0;
+          const loanStart = p.loan.start_date ? new Date(p.loan.start_date) : new Date(startYear, startMonth, 1);
+          const possessionDate = p.possession_date ? new Date(p.possession_date) : null;
           
-          if (i >= monthsSinceLoan) {
-            const remainingMonths = p.loan.tenure_months - (i - monthsSinceLoan);
-            if (remainingMonths > 0) {
-              totalLiabilities += p.loan.principal * (remainingMonths / p.loan.tenure_months);
+          const monthsSinceLoanStart = getMonthIndex(loanStart);
+          const monthsUntilPossession = possessionDate ? getMonthIndex(possessionDate) - i : Infinity;
+          
+          const isPreEmiPeriod = possessionDate && i < monthsUntilPossession;
+          const isAfterPossession = !possessionDate || i >= monthsUntilPossession;
+          const isLoanActive = i >= monthsSinceLoanStart && i < monthsSinceLoanStart + p.loan.tenure_months;
+          
+          let currentLoanBalance = loanBalances[p.id] || p.loan.principal;
+          const interestRate = p.loan.interest_rate / 100 / 12;
+          
+          if (isLoanActive) {
+            const interestComponent = currentLoanBalance * interestRate;
+            let emiAmount = p.loan.emi_amount;
+            
+            if (isPreEmiPeriod) {
+              monthlyExpenses += interestComponent;
+              monthlyLiabilities += currentLoanBalance;
+            } else if (isAfterPossession) {
+              let principalComponent = emiAmount - interestComponent;
+              if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
+                const overdraftAmt = p.loan.overdraft_account.overdraft_amount;
+                const impactType = p.loan.overdraft_account.impact_type;
+                
+                if (impactType === 'reduce_emi') {
+                  const adjustedPrincipal = Math.max(0, currentLoanBalance - overdraftAmt);
+                  if (adjustedPrincipal > 0) {
+                    const reducedInterest = adjustedPrincipal * interestRate;
+                    const reducedPrincipal = emiAmount - reducedInterest;
+                    if (reducedPrincipal > 0) {
+                      principalComponent = reducedPrincipal;
+                    }
+                  }
+                }
+              }
+              
+              const newBalance = Math.max(0, currentLoanBalance - principalComponent);
+              loanBalances[p.id] = newBalance;
+              monthlyLiabilities += newBalance;
+              monthlyExpenses += emiAmount;
             }
+          } else if (currentLoanBalance > 0) {
+            monthlyLiabilities += currentLoanBalance;
           }
         }
+
+        const installments = p.installments || [];
+        installments.forEach(inst => {
+          if (!inst.date || !inst.name || inst.amount <= 0) return;
+          const instDate = new Date(inst.date);
+          const instMonthIndex = getMonthIndex(instDate);
+          
+          if (instMonthIndex === i) {
+            if (inst.paid_by === 'individual') {
+              if (inst.is_completed) {
+                monthlyExpenses += inst.amount;
+              } else {
+                monthlyExpenses += 0;
+              }
+            } else if (inst.paid_by === 'bank') {
+              if (inst.is_completed) {
+                if (loanBalances[p.id] !== undefined) {
+                  loanBalances[p.id] += inst.amount;
+                }
+              }
+            }
+          }
+        });
+
+        const otherExpenses = p.other_expenses || [];
+        otherExpenses.forEach(exp => {
+          if (!exp.date || !exp.name || exp.amount <= 0) return;
+          const expDate = new Date(exp.date);
+          const expMonthIndex = getMonthIndex(expDate);
+          
+          if (expMonthIndex === i && exp.paid_by === 'individual') {
+            if (exp.is_completed) {
+              monthlyExpenses += exp.amount;
+            }
+          }
+        });
 
         const cashflows = p.cashflow_schedules || [];
         cashflows.forEach((cf) => {
           const cfStart = cf.start_date ? new Date(cf.start_date) : null;
-          const monthsSinceCf = cfStart ? Math.floor((new Date().getTime() - cfStart.getTime()) / (30 * 24 * 60 * 60 * 1000)) : 0;
+          const monthsSinceCf = cfStart ? getMonthIndex(cfStart) : -1;
           
           if (i >= monthsSinceCf || !cfStart) {
+            let cfAmount = cf.amount;
+            if (cf.frequency === 'quarterly') {
+              cfAmount = cf.amount / 3;
+            } else if (cf.frequency === 'yearly') {
+              cfAmount = cf.amount / 12;
+            }
+            
             if (cf.is_income) {
-              totalIncome += cf.amount;
+              monthlyIncome += cfAmount;
             } else {
-              totalExpenses += cf.amount;
+              monthlyExpenses += cfAmount;
             }
           }
         });
       });
 
-      cashInHand += totalIncome - totalExpenses;
+      otherAssets.forEach(a => {
+        if (a.included && otherAssetValues[a.id] !== undefined) {
+          const prevValue = otherAssetValues[a.id];
+          const monthlyReturn = (a.return_rate || 0) / 100 / 12;
+          const newValue = prevValue * (1 + monthlyReturn);
+          otherAssetValues[a.id] = newValue;
+          monthlyAssets += newValue;
+        }
+      });
 
-      if (i % 6 === 0) {
-        data.push({
-          name: label,
-          assets: Math.round(totalAssets),
-          liabilities: Math.round(totalLiabilities),
-          income: Math.round(totalIncome),
-          expenses: Math.round(totalExpenses),
-          netWorth: Math.round(totalAssets - totalLiabilities),
-          cashInHand: Math.round(cashInHand),
-        });
-      }
+      otherLiabilities.forEach(l => {
+        if (l.included && l.amount > 0) {
+          const interestRate = l.interest_rate / 100 / 12;
+          const interestComponent = l.amount * interestRate;
+          monthlyLiabilities += l.amount;
+          monthlyExpenses += interestComponent;
+        }
+      });
+
+      const netMonthlyCashflow = monthlyIncome - monthlyExpenses;
+      cashInHand += netMonthlyCashflow;
+
+      data.push({
+        name: label,
+        assets: Math.round(monthlyAssets),
+        liabilities: Math.round(monthlyLiabilities),
+        principalOutstanding: Math.round(monthlyLiabilities),
+        income: Math.round(monthlyIncome),
+        expenses: Math.round(monthlyExpenses),
+        netWorth: Math.round(monthlyAssets - monthlyLiabilities),
+        cashInHand: Math.round(cashInHand),
+        monthlyIncome: Math.round(monthlyIncome),
+        monthlyExpenses: Math.round(monthlyExpenses),
+      });
     }
 
     return data;
   };
 
-  const projectionData = generateProjectionData();
+  const projectionData = generateProjectionData(timelineMonths);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -402,17 +739,37 @@ export default function Home() {
               setActiveTab('add');
             }}
             className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'add'
+              activeTab === 'add' && !editingPropertyId
                 ? 'bg-blue-600 text-white'
                 : 'bg-white text-gray-700 border border-gray-300'
             }`}
           >
-            {editingPropertyId ? 'Edit Property' : 'Add Property'}
+            Add Property
           </button>
+          {editingPropertyId && (
+            <button
+              onClick={() => {
+                setFormData({
+                  ...initialFormData,
+                  incomes: [createEmptyCashflowRow()],
+                  expenses: [createEmptyCashflowRow()],
+                });
+                setEditingPropertyId(null);
+              }}
+              className="px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700"
+            >
+              Cancel Edit
+            </button>
+          )}
         </div>
 
         {activeTab === 'add' ? (
           <div className="bg-white rounded-lg shadow p-6">
+            {editingPropertyId && (
+              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                <p className="text-yellow-800 font-medium">Editing Property - Make your changes below and click Update</p>
+              </div>
+            )}
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <h2 className="text-lg font-semibold mb-4">Property Details</h2>
@@ -431,15 +788,43 @@ export default function Home() {
                     <label className="block text-sm font-medium text-gray-700">Property Type</label>
                     <select
                       value={formData.property_type}
-                      onChange={(e) => setFormData({ ...formData, property_type: e.target.value as PropertyType })}
+                      onChange={(e) => {
+                        const newType = e.target.value as PropertyType;
+                        setFormData({ 
+                          ...formData, 
+                          property_type: newType,
+                          property_status: newType === 'under_construction' ? 'under_construction' : 'ready_to_move_in'
+                        });
+                      }}
                       className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
                     >
                       <option value="residential">Residential</option>
                       <option value="commercial">Commercial</option>
                       <option value="plot">Plot</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Property Status</label>
+                    <select
+                      value={formData.property_status}
+                      onChange={(e) => setFormData({ ...formData, property_status: e.target.value as PropertyStatus })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                    >
+                      <option value="ready_to_move_in">Ready to Move In</option>
                       <option value="under_construction">Under Construction</option>
                     </select>
                   </div>
+                  {formData.property_status === 'under_construction' && (
+                    <div className="md:col-span-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowInstallmentModal(true)}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                      >
+                        Configure Installments & Expenses
+                      </button>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Purchase Date</label>
                     <input
@@ -473,6 +858,16 @@ export default function Home() {
                       type="number"
                       value={formData.current_valuation}
                       onChange={(e) => setFormData({ ...formData, current_valuation: Number(e.target.value) })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Appreciation Rate (% per year)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={formData.appreciation_rate}
+                      onChange={(e) => setFormData({ ...formData, appreciation_rate: Number(e.target.value) })}
                       className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
                     />
                   </div>
@@ -547,6 +942,41 @@ export default function Home() {
                         className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
                       />
                     </div>
+                    <div className="col-span-1 md:col-span-2 mt-4">
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={formData.has_overdraft}
+                          onChange={(e) => setFormData({ ...formData, has_overdraft: e.target.checked })}
+                          className="mr-2"
+                        />
+                        <label className="text-sm font-medium text-gray-700">Has Overdraft Account</label>
+                      </div>
+                    </div>
+                    {formData.has_overdraft && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Overdraft Amount (Cash maintained)</label>
+                          <input
+                            type="number"
+                            value={formData.overdraft_amount}
+                            onChange={(e) => setFormData({ ...formData, overdraft_amount: Number(e.target.value) })}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700">Impact Type</label>
+                          <select
+                            value={formData.overdraft_impact_type}
+                            onChange={(e) => setFormData({ ...formData, overdraft_impact_type: e.target.value })}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                          >
+                            <option value="reduce_emi">Reduce EMI (same tenure)</option>
+                            <option value="reduce_tenure">Reduce Tenure (same EMI)</option>
+                          </select>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -727,9 +1157,17 @@ export default function Home() {
                   <h2 className="text-lg font-semibold mb-4">Properties</h2>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {properties.map((p) => (
-                      <div key={p.id} className="border rounded-lg p-4">
+                      <div key={p.id} className={`border rounded-lg p-4 ${excludedPropertyIds.includes(p.id) ? 'opacity-50 bg-gray-100' : ''}`}>
                         <div className="flex justify-between items-start">
-                          <h3 className="font-semibold">{p.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={!excludedPropertyIds.includes(p.id)}
+                              onChange={() => togglePropertyInclusion(p.id)}
+                              className="w-4 h-4"
+                            />
+                            <h3 className="font-semibold">{p.name}</h3>
+                          </div>
                           <div className="flex gap-2">
                             <button
                               onClick={() => handleEdit(p)}
@@ -748,13 +1186,69 @@ export default function Home() {
                         <p className="text-sm text-gray-600 capitalize">{p.property_type.replace('_', ' ')}</p>
                         <p className="text-sm">Valuation: ₹{p.current_valuation.toLocaleString()}</p>
                         {p.loan && <p className="text-sm">Loan: ₹{p.loan.principal.toLocaleString()}</p>}
+                        {p.last_updated && <p className="text-xs text-gray-400">Updated: {p.last_updated ? new Date(p.last_updated).toLocaleDateString() : '-'}</p>}
                       </div>
                     ))}
                   </div>
                 </div>
 
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h2 className="text-lg font-semibold mb-4">Assets vs Liabilities Over Time</h2>
+                  <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-semibold">Other Assets & Liabilities</h2>
+                    <button
+                      onClick={() => setShowOtherAssetsModal(true)}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                    >
+                      Manage Other Assets & Liabilities
+                    </button>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-medium mb-2 text-green-700">Other Assets</h3>
+                      <div className="space-y-2 text-sm">
+                        {otherAssets.filter(a => a.included).map(a => (
+                          <div key={a.id} className="flex justify-between">
+                            <span>{a.name}{a.is_liquid ? ' 💧' : ''}</span>
+                            <span className="font-medium">₹{a.amount.toLocaleString()} @ {a.return_rate}%</span>
+                          </div>
+                        ))}
+                        {otherAssets.filter(a => a.included).length === 0 && <p className="text-gray-500">No assets included</p>}
+                      </div>
+                    </div>
+                    <div className="border rounded-lg p-4">
+                      <h3 className="font-medium mb-2 text-red-700">Other Liabilities</h3>
+                      <div className="space-y-2 text-sm">
+                        {otherLiabilities.filter(l => l.included).map(l => (
+                          <div key={l.id} className="flex justify-between">
+                            <span>{l.name}</span>
+                            <span className="font-medium">₹{l.amount.toLocaleString()} @ {l.interest_rate}%</span>
+                          </div>
+                        ))}
+                        {otherLiabilities.filter(l => l.included).length === 0 && <p className="text-gray-500">No liabilities included</p>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-semibold">Assets vs Liabilities Over Time</h2>
+                    <div className="flex gap-2">
+                      {[12, 24, 120, 240].map((months) => (
+                        <button
+                          key={months}
+                          onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                          className={`px-3 py-1 rounded text-sm font-medium ${
+                            timelineMonths === months
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {months} months
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={projectionData}>
@@ -764,32 +1258,595 @@ export default function Home() {
                         <Tooltip />
                         <Legend />
                         <Area type="monotone" dataKey="assets" stackId="1" stroke="#22c55e" fill="#22c55e" name="Assets" />
-                        <Area type="monotone" dataKey="liabilities" stackId="2" stroke="#ef4444" fill="#ef4444" name="Liabilities" />
+                        <Area type="monotone" dataKey="principalOutstanding" stackId="2" stroke="#f59e0b" fill="#f59e0b" name="Principal Outstanding" />
                         <Line type="monotone" dataKey="netWorth" stroke="#3b82f6" strokeWidth={2} name="Net Worth" dot={false} />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
+                  <div className="mt-4 p-4 bg-gray-50 rounded">
+                    <h3 className="font-medium mb-2">Calculation Breakdown</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Current Assets:</span>
+                        <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.assets.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Projected Assets ({timelineMonths}m):</span>
+                        <span className="ml-2 font-medium text-green-600">₹{projectionData[projectionData.length - 1]?.assets.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Current Liabilities:</span>
+                        <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.liabilities.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Projected Liabilities ({timelineMonths}m):</span>
+                        <span className="ml-2 font-medium text-red-600">₹{projectionData[projectionData.length - 1]?.liabilities.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Current Net Worth:</span>
+                        <span className="ml-2 font-medium text-blue-600">₹{projectionData[0]?.netWorth.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Projected Net Worth ({timelineMonths}m):</span>
+                        <span className="ml-2 font-medium text-blue-600">₹{projectionData[projectionData.length - 1]?.netWorth.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Asset Change:</span>
+                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)) >= 0 ? '+' : ''}₹{((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Liability Change:</span>
+                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0) <= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {(projectionData[projectionData.length - 1]?.liabilities || 0) <= (projectionData[0]?.liabilities || 0) ? '-' : '+'}₹{Math.abs(((projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0))).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="bg-white rounded-lg shadow p-6">
-                  <h2 className="text-lg font-semibold mb-4">Cashflow - Income vs Expenses Over Time</h2>
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-semibold">Cashflow - Income vs Expenses Over Time</h2>
+                    <div className="flex gap-2">
+                      {[12, 24, 120, 240].map((months) => (
+                        <button
+                          key={months}
+                          onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                          className={`px-3 py-1 rounded text-sm font-medium ${
+                            timelineMonths === months
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          {months} months
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={projectionData}>
+                      <LineChart data={projectionData}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} />
                         <Tooltip />
                         <Legend />
-                        <Area type="monotone" dataKey="income" stackId="1" stroke="#22c55e" fill="#22c55e" name="Income" />
-                        <Area type="monotone" dataKey="expenses" stackId="2" stroke="#ef4444" fill="#ef4444" name="Expenses" />
+                        <Line type="monotone" dataKey="monthlyIncome" stroke="#22c55e" strokeWidth={2} name="Monthly Income" dot={false} />
+                        <Line type="monotone" dataKey="monthlyExpenses" stroke="#ef4444" strokeWidth={2} name="Monthly Expenses" dot={false} />
                         <Line type="monotone" dataKey="cashInHand" stroke="#3b82f6" strokeWidth={2} name="Cash in Hand" dot={false} />
-                      </AreaChart>
+                      </LineChart>
                     </ResponsiveContainer>
+                  </div>
+                  <div className="mt-4 p-4 bg-gray-50 rounded">
+                    <h3 className="font-medium mb-2">Calculation Breakdown</h3>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <span className="text-gray-600">Current Monthly Income:</span>
+                        <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.monthlyIncome.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Current Monthly Expenses:</span>
+                        <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.monthlyExpenses.toLocaleString() || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Cumulative Income ({timelineMonths}m):</span>
+                        <span className="ml-2 font-medium text-green-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0).toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Cumulative Expenses ({timelineMonths}m):</span>
+                        <span className="ml-2 font-medium text-red-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0).toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Net Cash Flow ({timelineMonths}m):</span>
+                        <span className={`ml-2 font-medium ${projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          ₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0).toLocaleString()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Cash in Hand ({timelineMonths}m):</span>
+                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.cashInHand || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          ₹{projectionData[projectionData.length - 1]?.cashInHand.toLocaleString() || 0}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Avg Monthly Income:</span>
+                        <span className="ml-2 font-medium text-green-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0) / timelineMonths).toLocaleString() : 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Avg Monthly Expenses:</span>
+                        <span className="ml-2 font-medium text-red-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0) / timelineMonths).toLocaleString() : 0}</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>
             )}
+          </div>
+        )}
+      {deleteConfirmProperty && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg p-6 max-w-md mx-4">
+              <h3 className="text-lg font-semibold text-red-600 mb-2">Confirm Delete Property</h3>
+              <p className="text-gray-700 mb-4">
+                Are you sure you want to delete <strong>{deleteConfirmProperty.name}</strong>? This action cannot be undone.
+              </p>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setDeleteConfirmProperty(null)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showOtherAssetsModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg p-6 max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold text-purple-600 mb-4">Manage Other Assets & Liabilities</h3>
+              
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-green-700">Other Assets</h4>
+                  <button
+                    type="button"
+                    onClick={addOtherAsset}
+                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    + Add Asset
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {otherAssets.map((asset, index) => (
+                    <div key={asset.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <input
+                        type="checkbox"
+                        checked={asset.included}
+                        onChange={(e) => {
+                          const updated = [...otherAssets];
+                          updated[index].included = e.target.checked;
+                          setOtherAssets(updated);
+                        }}
+                        className="w-5 h-5"
+                      />
+                      <div className="flex-1 grid grid-cols-2 md:grid-cols-5 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={asset.name}
+                            onChange={(e) => {
+                              const updated = [...otherAssets];
+                              updated[index].name = e.target.value;
+                              setOtherAssets(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={asset.amount}
+                            onChange={(e) => {
+                              const updated = [...otherAssets];
+                              updated[index].amount = Number(e.target.value);
+                              setOtherAssets(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Return Rate (% p.a.)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={asset.return_rate}
+                            onChange={(e) => {
+                              const updated = [...otherAssets];
+                              updated[index].return_rate = Number(e.target.value);
+                              setOtherAssets(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center pt-4">
+                          <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={asset.is_liquid}
+                              onChange={(e) => {
+                                const updated = [...otherAssets];
+                                updated[index].is_liquid = e.target.checked;
+                                setOtherAssets(updated);
+                              }}
+                              className="w-4 h-4"
+                            />
+                            Liquid
+                          </label>
+                        </div>
+                        <div className="flex items-center justify-center pt-4">
+                          <button
+                            type="button"
+                            onClick={() => removeOtherAsset(asset.id)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-red-700">Other Liabilities</h4>
+                  <button
+                    type="button"
+                    onClick={addOtherLiability}
+                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                  >
+                    + Add Liability
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {otherLiabilities.map((liability, index) => (
+                    <div key={liability.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <input
+                        type="checkbox"
+                        checked={liability.included}
+                        onChange={(e) => {
+                          const updated = [...otherLiabilities];
+                          updated[index].included = e.target.checked;
+                          setOtherLiabilities(updated);
+                        }}
+                        className="w-5 h-5"
+                      />
+                      <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={liability.name}
+                            onChange={(e) => {
+                              const updated = [...otherLiabilities];
+                              updated[index].name = e.target.value;
+                              setOtherLiabilities(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={liability.amount}
+                            onChange={(e) => {
+                              const updated = [...otherLiabilities];
+                              updated[index].amount = Number(e.target.value);
+                              setOtherLiabilities(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Interest Rate (% p.a.)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={liability.interest_rate}
+                            onChange={(e) => {
+                              const updated = [...otherLiabilities];
+                              updated[index].interest_rate = Number(e.target.value);
+                              setOtherLiabilities(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center pt-4">
+                          <button
+                            type="button"
+                            onClick={() => removeOtherLiability(liability.id)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowOtherAssetsModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showInstallmentModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg p-6 max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold text-purple-600 mb-4">Installment & Expense Details</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                For under-construction properties, configure the disbursed loan installments and other expenses. 
+                Payments made by the bank increase the loan principal, while individual payments reduce cash in hand.
+              </p>
+              
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-blue-700">Loan Installments (Disbursements)</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData({
+                        ...formData,
+                        installments: [...formData.installments, createEmptyInstallment()],
+                      });
+                    }}
+                    className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                  >
+                    + Add Installment
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {formData.installments.map((inst, index) => (
+                    <div key={inst.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <div className="flex-1 grid grid-cols-2 md:grid-cols-6 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={inst.name}
+                            onChange={(e) => {
+                              const updated = [...formData.installments];
+                              updated[index].name = e.target.value;
+                              setFormData({ ...formData, installments: updated });
+                            }}
+                            placeholder="e.g., 1st Disbursement"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={inst.amount}
+                            onChange={(e) => {
+                              const updated = [...formData.installments];
+                              updated[index].amount = Number(e.target.value);
+                              setFormData({ ...formData, installments: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Date</label>
+                          <input
+                            type="date"
+                            value={inst.date}
+                            onChange={(e) => {
+                              const updated = [...formData.installments];
+                              updated[index].date = e.target.value;
+                              setFormData({ ...formData, installments: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Paid By</label>
+                          <select
+                            value={inst.paid_by}
+                            onChange={(e) => {
+                              const updated = [...formData.installments];
+                              updated[index].paid_by = e.target.value as PaidBy;
+                              setFormData({ ...formData, installments: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            <option value="individual">Individual</option>
+                            <option value="bank">Bank</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Type</label>
+                          <select
+                            value={inst.is_interest ? 'interest' : 'principal'}
+                            onChange={(e) => {
+                              const updated = [...formData.installments];
+                              updated[index].is_interest = e.target.value === 'interest';
+                              setFormData({ ...formData, installments: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            <option value="principal">Principal</option>
+                            <option value="interest">Interest (Pre-EMI)</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-2 pt-4">
+                          <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={inst.is_completed}
+                              onChange={(e) => {
+                                const updated = [...formData.installments];
+                                updated[index].is_completed = e.target.checked;
+                                setFormData({ ...formData, installments: updated });
+                              }}
+                              className="w-4 h-4"
+                            />
+                            Paid
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = formData.installments.filter((_, i) => i !== index);
+                              setFormData({ ...formData, installments: updated.length > 0 ? updated : [createEmptyInstallment()] });
+                            }}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-red-700">Other Expenses (Registration, Woodwork, etc.)</h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData({
+                        ...formData,
+                        other_expenses: [...formData.other_expenses, createEmptyOtherExpense()],
+                      });
+                    }}
+                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                  >
+                    + Add Expense
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {formData.other_expenses.map((exp, index) => (
+                    <div key={exp.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <div className="flex-1 grid grid-cols-2 md:grid-cols-5 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={exp.name}
+                            onChange={(e) => {
+                              const updated = [...formData.other_expenses];
+                              updated[index].name = e.target.value;
+                              setFormData({ ...formData, other_expenses: updated });
+                            }}
+                            placeholder="e.g., Registration"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={exp.amount}
+                            onChange={(e) => {
+                              const updated = [...formData.other_expenses];
+                              updated[index].amount = Number(e.target.value);
+                              setFormData({ ...formData, other_expenses: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Date</label>
+                          <input
+                            type="date"
+                            value={exp.date}
+                            onChange={(e) => {
+                              const updated = [...formData.other_expenses];
+                              updated[index].date = e.target.value;
+                              setFormData({ ...formData, other_expenses: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Paid By</label>
+                          <select
+                            value={exp.paid_by}
+                            onChange={(e) => {
+                              const updated = [...formData.other_expenses];
+                              updated[index].paid_by = e.target.value as PaidBy;
+                              setFormData({ ...formData, other_expenses: updated });
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            <option value="individual">Individual</option>
+                            <option value="bank">Bank</option>
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-2 pt-4">
+                          <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={exp.is_completed}
+                              onChange={(e) => {
+                                const updated = [...formData.other_expenses];
+                                updated[index].is_completed = e.target.checked;
+                                setFormData({ ...formData, other_expenses: updated });
+                              }}
+                              className="w-4 h-4"
+                            />
+                            Paid
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = formData.other_expenses.filter((_, i) => i !== index);
+                              setFormData({ ...formData, other_expenses: updated.length > 0 ? updated : [createEmptyOtherExpense()] });
+                            }}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowInstallmentModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Close & Save
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </main>

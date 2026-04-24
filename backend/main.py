@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional, List
-from datetime import date
+from datetime import date, datetime
 from sqlalchemy import (
     create_engine,
     Column,
@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Float,
     Date,
+    DateTime,
     ForeignKey,
     Enum,
 )
@@ -56,11 +57,24 @@ class Property(Base):
     possession_date = Column(Date, nullable=True)
     purchase_price = Column(Float, default=0)
     current_valuation = Column(Float, default=0)
+    appreciation_rate = Column(Float, default=0)
     is_primary_residence = Column(Integer, default=0)
+    created_at = Column(DateTime, default=lambda: datetime.now())
+    last_updated = Column(DateTime, default=lambda: datetime.now())
 
     loans = relationship("Loan", back_populates="property")
     cashflow_schedules = relationship("CashflowSchedule", back_populates="property")
     events = relationship("Event", back_populates="property")
+
+
+class OverdraftAccount(Base):
+    __tablename__ = "overdraft_accounts"
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
+    overdraft_amount = Column(Float, default=0)
+    impact_type = Column(String, default="reduce_emi")
+
+    loan = relationship("Loan", back_populates="overdraft_account")
 
 
 class Loan(Base):
@@ -75,6 +89,9 @@ class Loan(Base):
     pre_emi = Column(Integer, default=0)
 
     property = relationship("Property", back_populates="loans")
+    overdraft_account = relationship(
+        "OverdraftAccount", back_populates="loan", uselist=False
+    )
 
 
 class CashflowSchedule(Base):
@@ -120,6 +137,12 @@ class LoanCreate(BaseModel):
     emi_amount: float = 0
     start_date: Optional[date] = None
     pre_emi: bool = False
+    overdraft_account: Optional["OverdraftAccountCreate"] = None
+
+
+class OverdraftAccountCreate(BaseModel):
+    overdraft_amount: float = 0
+    impact_type: str = "reduce_emi"
 
 
 class CashflowScheduleCreate(BaseModel):
@@ -144,6 +167,7 @@ class PropertyCreate(BaseModel):
     possession_date: Optional[date] = None
     purchase_price: float = 0
     current_valuation: float = 0
+    appreciation_rate: float = 0
     is_primary_residence: bool = False
     loan: Optional[LoanCreate] = None
     cashflow_schedules: Optional[List[CashflowScheduleCreate]] = []
@@ -152,6 +176,7 @@ class PropertyCreate(BaseModel):
 
 class PropertyResponse(PropertyCreate):
     id: int
+    last_updated: Optional[datetime] = None
     loan: Optional[LoanCreate] = None
     cashflow_schedules: List[CashflowScheduleCreate] = []
     events: List[EventCreate] = []
@@ -188,8 +213,11 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
         possession_date=property.possession_date,
         purchase_price=property.purchase_price,
         current_valuation=property.current_valuation,
+        appreciation_rate=property.appreciation_rate,
         is_primary_residence=int(property.is_primary_residence),
         person_id=1,
+        created_at=datetime.now(),
+        last_updated=datetime.now(),
     )
     db.add(db_property)
     db.commit()
@@ -206,6 +234,16 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
             pre_emi=int(property.loan.pre_emi),
         )
         db.add(db_loan)
+        db.commit()
+        db.refresh(db_loan)
+
+        if property.loan.overdraft_account:
+            db_overdraft = OverdraftAccount(
+                loan_id=db_loan.id,
+                overdraft_amount=property.loan.overdraft_account.overdraft_amount,
+                impact_type=property.loan.overdraft_account.impact_type,
+            )
+            db.add(db_overdraft)
 
     for cf in property.cashflow_schedules:
         db_cf = CashflowSchedule(
@@ -232,6 +270,12 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
 
     loan_data = None
     if property.loan:
+        od_data = None
+        if property.loan.overdraft_account:
+            od_data = OverdraftAccountCreate(
+                overdraft_amount=property.loan.overdraft_account.overdraft_amount,
+                impact_type=property.loan.overdraft_account.impact_type,
+            )
         loan_data = LoanCreate(
             principal=db_loan.principal,
             interest_rate=db_loan.interest_rate,
@@ -239,6 +283,7 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
             emi_amount=db_loan.emi_amount,
             start_date=db_loan.start_date,
             pre_emi=bool(db_loan.pre_emi),
+            overdraft_account=od_data,
         )
 
     db_cfs = (
@@ -256,6 +301,7 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
         purchase_price=db_property.purchase_price,
         current_valuation=db_property.current_valuation,
         is_primary_residence=bool(db_property.is_primary_residence),
+        last_updated=db_property.last_updated,
         loan=loan_data,
         cashflow_schedules=[
             CashflowScheduleCreate(
@@ -287,6 +333,15 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
     loan_data = None
     if loans:
         l = loans[0]
+        od_data = None
+        overdraft = (
+            db.query(OverdraftAccount).filter(OverdraftAccount.loan_id == l.id).first()
+        )
+        if overdraft:
+            od_data = OverdraftAccountCreate(
+                overdraft_amount=overdraft.overdraft_amount,
+                impact_type=overdraft.impact_type,
+            )
         loan_data = LoanCreate(
             principal=l.principal,
             interest_rate=l.interest_rate,
@@ -294,6 +349,7 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
             emi_amount=l.emi_amount,
             start_date=l.start_date,
             pre_emi=bool(l.pre_emi),
+            overdraft_account=od_data,
         )
 
     return PropertyResponse(
@@ -304,7 +360,9 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
         possession_date=p.possession_date,
         purchase_price=p.purchase_price,
         current_valuation=p.current_valuation,
+        appreciation_rate=p.appreciation_rate,
         is_primary_residence=bool(p.is_primary_residence),
+        last_updated=p.last_updated,
         loan=loan_data,
         cashflow_schedules=[
             CashflowScheduleCreate(
@@ -342,7 +400,9 @@ def update_property(
     db_property.possession_date = property.possession_date
     db_property.purchase_price = property.purchase_price
     db_property.current_valuation = property.current_valuation
+    db_property.appreciation_rate = property.appreciation_rate
     db_property.is_primary_residence = int(property.is_primary_residence)
+    db_property.last_updated = datetime.now()
 
     db.query(Loan).filter(Loan.property_id == property_id).delete()
     db.query(CashflowSchedule).filter(
@@ -361,6 +421,16 @@ def update_property(
             pre_emi=int(property.loan.pre_emi),
         )
         db.add(db_loan)
+        db.commit()
+        db.refresh(db_loan)
+
+        if property.loan.overdraft_account:
+            db_overdraft = OverdraftAccount(
+                loan_id=db_loan.id,
+                overdraft_amount=property.loan.overdraft_account.overdraft_amount,
+                impact_type=property.loan.overdraft_account.impact_type,
+            )
+            db.add(db_overdraft)
 
     for cf in property.cashflow_schedules:
         db_cf = CashflowSchedule(
@@ -388,6 +458,12 @@ def update_property(
 
     loan_data = None
     if property.loan:
+        od_data = None
+        if property.loan.overdraft_account:
+            od_data = OverdraftAccountCreate(
+                overdraft_amount=property.loan.overdraft_account.overdraft_amount,
+                impact_type=property.loan.overdraft_account.impact_type,
+            )
         loan_data = LoanCreate(
             principal=property.loan.principal,
             interest_rate=property.loan.interest_rate,
@@ -395,6 +471,7 @@ def update_property(
             emi_amount=property.loan.emi_amount,
             start_date=property.loan.start_date,
             pre_emi=property.loan.pre_emi,
+            overdraft_account=od_data,
         )
 
     db_cfs = (
@@ -411,7 +488,9 @@ def update_property(
         possession_date=db_property.possession_date,
         purchase_price=db_property.purchase_price,
         current_valuation=db_property.current_valuation,
+        appreciation_rate=db_property.appreciation_rate,
         is_primary_residence=bool(db_property.is_primary_residence),
+        last_updated=db_property.last_updated,
         loan=loan_data,
         cashflow_schedules=[
             CashflowScheduleCreate(
@@ -434,6 +513,9 @@ def delete_property(property_id: int, db: Session = Depends(get_db)):
     if not db_property:
         raise HTTPException(status_code=404, detail="Property not found")
 
+    loans = db.query(Loan).filter(Loan.property_id == property_id).all()
+    for loan in loans:
+        db.query(OverdraftAccount).filter(OverdraftAccount.loan_id == loan.id).delete()
     db.query(Loan).filter(Loan.property_id == property_id).delete()
     db.query(CashflowSchedule).filter(
         CashflowSchedule.property_id == property_id
@@ -461,6 +543,17 @@ def get_properties(db: Session = Depends(get_db)):
         loan_data = None
         if loans:
             l = loans[0]
+            od_data = None
+            overdraft = (
+                db.query(OverdraftAccount)
+                .filter(OverdraftAccount.loan_id == l.id)
+                .first()
+            )
+            if overdraft:
+                od_data = OverdraftAccountCreate(
+                    overdraft_amount=overdraft.overdraft_amount,
+                    impact_type=overdraft.impact_type,
+                )
             loan_data = LoanCreate(
                 principal=l.principal,
                 interest_rate=l.interest_rate,
@@ -468,6 +561,7 @@ def get_properties(db: Session = Depends(get_db)):
                 emi_amount=l.emi_amount,
                 start_date=l.start_date,
                 pre_emi=bool(l.pre_emi),
+                overdraft_account=od_data,
             )
 
         result.append(
@@ -479,6 +573,7 @@ def get_properties(db: Session = Depends(get_db)):
                 possession_date=p.possession_date,
                 purchase_price=p.purchase_price,
                 current_valuation=p.current_valuation,
+                appreciation_rate=p.appreciation_rate,
                 is_primary_residence=bool(p.is_primary_residence),
                 loan=loan_data,
                 cashflow_schedules=[
