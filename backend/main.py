@@ -737,6 +737,9 @@ def get_properties(db: Session = Depends(get_db)):
             .all()
         )
         events = db.query(Event).filter(Event.property_id == p.id).all()
+        installments = (
+            db.query(Installment).filter(Installment.property_id == p.id).all()
+        )
 
         loan_data = None
         if loans:
@@ -767,6 +770,7 @@ def get_properties(db: Session = Depends(get_db)):
                 id=p.id,
                 name=p.name,
                 property_type=p.property_type,
+                property_status=p.property_status,
                 purchase_date=p.purchase_date,
                 possession_date=p.possession_date,
                 purchase_price=p.purchase_price,
@@ -792,6 +796,17 @@ def get_properties(db: Session = Depends(get_db)):
                         description=e.description,
                     )
                     for e in events
+                ],
+                installments=[
+                    InstallmentCreate(
+                        name=inst.name,
+                        amount=inst.amount,
+                        date=str(inst.date) if inst.date else None,
+                        paid_by=inst.paid_by,
+                        is_interest=bool(inst.is_interest),
+                        is_completed=bool(inst.is_completed),
+                    )
+                    for inst in installments
                 ],
             )
         )
