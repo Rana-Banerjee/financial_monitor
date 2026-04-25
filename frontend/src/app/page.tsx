@@ -300,21 +300,20 @@ export default function Home() {
       new Date(inst.date) <= today
     );
     
-    let preEMI = 0;
+    let bankInstallmentSum = 0;
     for (const inst of bankDisbursedInstallments) {
       if (inst.is_interest) {
         const principal = loanConfig.principalAmount;
         const monthlyRate = loanConfig.interestRate / 100 / 12;
         const interestAmount = principal * monthlyRate;
-        preEMI += interestAmount;
+        bankInstallmentSum += interestAmount;
       } else {
-        preEMI += inst.amount;
+        bankInstallmentSum += inst.amount;
       }
     }
     
-    if (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > 0 && loanConfig.impactType === 'EMI') {
-      preEMI = Math.max(0, preEMI - loanConfig.overdraftCashAmount);
-    }
+    const monthlyRate = loanConfig.interestRate / 100 / 12;
+    const preEMI = Math.max(0, bankInstallmentSum - loanConfig.overdraftCashAmount) * monthlyRate;
     
     return Math.round(preEMI * 100) / 100;
   };
@@ -2264,7 +2263,7 @@ export default function Home() {
 
         {showLoanConfigModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-lg p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto">
               <h2 className="text-xl font-semibold mb-4">Loan Configuration</h2>
               
               <div className="space-y-4">
