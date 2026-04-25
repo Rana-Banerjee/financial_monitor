@@ -1147,242 +1147,275 @@ export default function Home() {
           </div>
         ) : (
           <div className="space-y-6">
-            {properties.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500">
-                No properties yet. Click &quot;Add Property&quot; to get started.
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Properties</h2>
+                <button
+                  onClick={() => {
+                    setFormData({
+                      ...initialFormData,
+                      incomes: [createEmptyCashflowRow()],
+                      expenses: [createEmptyCashflowRow()],
+                    });
+                    setEditingPropertyId(null);
+                    setActiveTab('add');
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                >
+                  Add Property
+                </button>
               </div>
-            ) : (
-              <>
-                <div className="bg-white rounded-lg shadow p-6">
-                  <h2 className="text-lg font-semibold mb-4">Properties</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {properties.map((p) => (
-                      <div key={p.id} className={`border rounded-lg p-4 ${excludedPropertyIds.includes(p.id) ? 'opacity-50 bg-gray-100' : ''}`}>
-                        <div className="flex justify-between items-start">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={!excludedPropertyIds.includes(p.id)}
-                              onChange={() => togglePropertyInclusion(p.id)}
-                              className="w-4 h-4"
-                            />
-                            <h3 className="font-semibold">{p.name}</h3>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleEdit(p)}
-                              className="text-blue-600 hover:text-blue-800 text-sm"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleDelete(p.id)}
-                              className="text-red-600 hover:text-red-800 text-sm"
-                            >
-                              Delete
-                            </button>
-                          </div>
+              {properties.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">No properties yet. Click &quot;Add Property&quot; to get started.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {properties.map((p) => (
+                    <div key={p.id} className={`border rounded-lg p-4 ${excludedPropertyIds.includes(p.id) ? 'opacity-50 bg-gray-100' : ''}`}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={!excludedPropertyIds.includes(p.id)}
+                            onChange={() => togglePropertyInclusion(p.id)}
+                            className="w-4 h-4"
+                          />
+                          <h3 className="font-semibold">{p.name}</h3>
                         </div>
-                        <p className="text-sm text-gray-600 capitalize">{p.property_type.replace('_', ' ')}</p>
-                        <p className="text-sm">Valuation: ₹{p.current_valuation.toLocaleString()}</p>
-                        {p.loan && <p className="text-sm">Loan: ₹{p.loan.principal.toLocaleString()}</p>}
-                        {p.last_updated && <p className="text-xs text-gray-400">Updated: {p.last_updated ? new Date(p.last_updated).toLocaleDateString() : '-'}</p>}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEdit(p)}
+                            className="text-blue-600 hover:text-blue-800 text-sm"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p.id)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 capitalize">{p.property_type.replace('_', ' ')}</p>
+                      <p className="text-sm">Valuation: ₹{p.current_valuation.toLocaleString()}</p>
+                      {p.loan && <p className="text-sm">Loan: ₹{p.loan.principal.toLocaleString()}</p>}
+                      {p.last_updated && <p className="text-xs text-gray-400">Updated: {p.last_updated ? new Date(p.last_updated).toLocaleDateString() : '-'}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Assets & Liabilities</h2>
+                <button
+                  onClick={() => setShowOtherAssetsModal(true)}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                >
+                  Manage Assets & Liabilities
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border rounded-lg p-4">
+                  <h3 className="font-medium mb-2 text-green-700">Other Assets</h3>
+                  <div className="space-y-2 text-sm">
+                    {otherAssets.filter(a => a.included).map(a => (
+                      <div key={a.id} className="flex justify-between">
+                        <span>{a.name}{a.is_liquid ? ' 💧' : ''}</span>
+                        <span className="font-medium">₹{a.amount.toLocaleString()} @ {a.return_rate}%</span>
                       </div>
                     ))}
+                    {otherAssets.filter(a => a.included).length === 0 && <p className="text-gray-500">No assets included</p>}
                   </div>
                 </div>
+                <div className="border rounded-lg p-4">
+                  <h3 className="font-medium mb-2 text-red-700">Other Liabilities</h3>
+                  <div className="space-y-2 text-sm">
+                    {otherLiabilities.filter(l => l.included).map(l => (
+                      <div key={l.id} className="flex justify-between">
+                        <span>{l.name}</span>
+                        <span className="font-medium">₹{l.amount.toLocaleString()} @ {l.interest_rate}%</span>
+                      </div>
+                    ))}
+                    {otherLiabilities.filter(l => l.included).length === 0 && <p className="text-gray-500">No liabilities included</p>}
+                  </div>
+                </div>
+              </div>
+            </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
-                  <div className="flex justify-between items-center">
-                    <h2 className="text-lg font-semibold">Other Assets & Liabilities</h2>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Income & Expenses</h2>
+                <button
+                  onClick={() => {
+                    setFormData({
+                      ...initialFormData,
+                      incomes: [createEmptyCashflowRow()],
+                      expenses: [createEmptyCashflowRow()],
+                    });
+                    setEditingPropertyId(null);
+                    setActiveTab('add');
+                  }}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
+                >
+                  Manage Income & Expenses
+                </button>
+              </div>
+              <p className="text-gray-500 text-sm">Add a property to manage its income and expenses.</p>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Assets vs Liabilities Over Time</h2>
+                <div className="flex gap-2">
+                  {[12, 24, 120, 240].map((months) => (
                     <button
-                      onClick={() => setShowOtherAssetsModal(true)}
-                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                      key={months}
+                      onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                      className={`px-3 py-1 rounded text-sm font-medium ${
+                        timelineMonths === months
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
                     >
-                      Manage Other Assets & Liabilities
+                      {months} months
                     </button>
+                  ))}
+                </div>
+              </div>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={projectionData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Area type="monotone" dataKey="assets" stackId="1" stroke="#22c55e" fill="#22c55e" name="Assets" />
+                    <Area type="monotone" dataKey="principalOutstanding" stackId="2" stroke="#f59e0b" fill="#f59e0b" name="Principal Outstanding" />
+                    <Line type="monotone" dataKey="netWorth" stroke="#3b82f6" strokeWidth={2} name="Net Worth" dot={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-4 p-4 bg-gray-50 rounded">
+                <h3 className="font-medium mb-2">Calculation Breakdown</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Current Assets:</span>
+                    <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.assets.toLocaleString() || 0}</span>
                   </div>
-                  <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="border rounded-lg p-4">
-                      <h3 className="font-medium mb-2 text-green-700">Other Assets</h3>
-                      <div className="space-y-2 text-sm">
-                        {otherAssets.filter(a => a.included).map(a => (
-                          <div key={a.id} className="flex justify-between">
-                            <span>{a.name}{a.is_liquid ? ' 💧' : ''}</span>
-                            <span className="font-medium">₹{a.amount.toLocaleString()} @ {a.return_rate}%</span>
-                          </div>
-                        ))}
-                        {otherAssets.filter(a => a.included).length === 0 && <p className="text-gray-500">No assets included</p>}
-                      </div>
-                    </div>
-                    <div className="border rounded-lg p-4">
-                      <h3 className="font-medium mb-2 text-red-700">Other Liabilities</h3>
-                      <div className="space-y-2 text-sm">
-                        {otherLiabilities.filter(l => l.included).map(l => (
-                          <div key={l.id} className="flex justify-between">
-                            <span>{l.name}</span>
-                            <span className="font-medium">₹{l.amount.toLocaleString()} @ {l.interest_rate}%</span>
-                          </div>
-                        ))}
-                        {otherLiabilities.filter(l => l.included).length === 0 && <p className="text-gray-500">No liabilities included</p>}
-                      </div>
-                    </div>
+                  <div>
+                    <span className="text-gray-600">Projected Assets ({timelineMonths}m):</span>
+                    <span className="ml-2 font-medium text-green-600">₹{projectionData[projectionData.length - 1]?.assets.toLocaleString() || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Current Liabilities:</span>
+                    <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.liabilities.toLocaleString() || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Projected Liabilities ({timelineMonths}m):</span>
+                    <span className="ml-2 font-medium text-red-600">₹{projectionData[projectionData.length - 1]?.liabilities.toLocaleString() || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Current Net Worth:</span>
+                    <span className="ml-2 font-medium text-blue-600">₹{projectionData[0]?.netWorth.toLocaleString() || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Projected Net Worth ({timelineMonths}m):</span>
+                    <span className="ml-2 font-medium text-blue-600">₹{projectionData[projectionData.length - 1]?.netWorth.toLocaleString() || 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Asset Change:</span>
+                    <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)) >= 0 ? '+' : ''}₹{((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Liability Change:</span>
+                    <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0) <= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(projectionData[projectionData.length - 1]?.liabilities || 0) <= (projectionData[0]?.liabilities || 0) ? '-' : '+'}₹{Math.abs(((projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0))).toLocaleString()}
+                    </span>
                   </div>
                 </div>
+              </div>
+            </div>
 
-                <div className="bg-white rounded-lg shadow p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-lg font-semibold">Assets vs Liabilities Over Time</h2>
-                    <div className="flex gap-2">
-                      {[12, 24, 120, 240].map((months) => (
-                        <button
-                          key={months}
-                          onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
-                          className={`px-3 py-1 rounded text-sm font-medium ${
-                            timelineMonths === months
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          {months} months
-                        </button>
-                      ))}
-                    </div>
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Cashflow - Income vs Expenses Over Time</h2>
+                <div className="flex gap-2">
+                  {[12, 24, 120, 240].map((months) => (
+                    <button
+                      key={months}
+                      onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                      className={`px-3 py-1 rounded text-sm font-medium ${
+                        timelineMonths === months
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      }`}
+                    >
+                      {months} months
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={projectionData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="monthlyIncome" stroke="#22c55e" strokeWidth={2} name="Monthly Income" dot={false} />
+                    <Line type="monotone" dataKey="monthlyExpenses" stroke="#ef4444" strokeWidth={2} name="Monthly Expenses" dot={false} />
+                    <Line type="monotone" dataKey="cashInHand" stroke="#3b82f6" strokeWidth={2} name="Cash in Hand" dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-4 p-4 bg-gray-50 rounded">
+                <h3 className="font-medium mb-2">Calculation Breakdown</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Current Monthly Income:</span>
+                    <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.monthlyIncome.toLocaleString() || 0}</span>
                   </div>
-                  <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={projectionData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <Tooltip />
-                        <Legend />
-                        <Area type="monotone" dataKey="assets" stackId="1" stroke="#22c55e" fill="#22c55e" name="Assets" />
-                        <Area type="monotone" dataKey="principalOutstanding" stackId="2" stroke="#f59e0b" fill="#f59e0b" name="Principal Outstanding" />
-                        <Line type="monotone" dataKey="netWorth" stroke="#3b82f6" strokeWidth={2} name="Net Worth" dot={false} />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                  <div>
+                    <span className="text-gray-600">Current Monthly Expenses:</span>
+                    <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.monthlyExpenses.toLocaleString() || 0}</span>
                   </div>
-                  <div className="mt-4 p-4 bg-gray-50 rounded">
-                    <h3 className="font-medium mb-2">Calculation Breakdown</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Current Assets:</span>
-                        <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.assets.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Projected Assets ({timelineMonths}m):</span>
-                        <span className="ml-2 font-medium text-green-600">₹{projectionData[projectionData.length - 1]?.assets.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Current Liabilities:</span>
-                        <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.liabilities.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Projected Liabilities ({timelineMonths}m):</span>
-                        <span className="ml-2 font-medium text-red-600">₹{projectionData[projectionData.length - 1]?.liabilities.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Current Net Worth:</span>
-                        <span className="ml-2 font-medium text-blue-600">₹{projectionData[0]?.netWorth.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Projected Net Worth ({timelineMonths}m):</span>
-                        <span className="ml-2 font-medium text-blue-600">₹{projectionData[projectionData.length - 1]?.netWorth.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Asset Change:</span>
-                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)) >= 0 ? '+' : ''}₹{((projectionData[projectionData.length - 1]?.assets || 0) - (projectionData[0]?.assets || 0)).toLocaleString()}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Liability Change:</span>
-                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0) <= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {(projectionData[projectionData.length - 1]?.liabilities || 0) <= (projectionData[0]?.liabilities || 0) ? '-' : '+'}₹{Math.abs(((projectionData[projectionData.length - 1]?.liabilities || 0) - (projectionData[0]?.liabilities || 0))).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
+                  <div>
+                    <span className="text-gray-600">Cumulative Income ({timelineMonths}m):</span>
+                    <span className="ml-2 font-medium text-green-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Cumulative Expenses ({timelineMonths}m):</span>
+                    <span className="ml-2 font-medium text-red-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0).toLocaleString()}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Net Cash Flow ({timelineMonths}m):</span>
+                    <span className={`ml-2 font-medium ${projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Cash in Hand ({timelineMonths}m):</span>
+                    <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.cashInHand || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ₹{projectionData[projectionData.length - 1]?.cashInHand.toLocaleString() || 0}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Avg Monthly Income:</span>
+                    <span className="ml-2 font-medium text-green-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0) / timelineMonths).toLocaleString() : 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Avg Monthly Expenses:</span>
+                    <span className="ml-2 font-medium text-red-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0) / timelineMonths).toLocaleString() : 0}</span>
                   </div>
                 </div>
-
-                <div className="bg-white rounded-lg shadow p-6">
-                  <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-lg font-semibold">Cashflow - Income vs Expenses Over Time</h2>
-                    <div className="flex gap-2">
-                      {[12, 24, 120, 240].map((months) => (
-                        <button
-                          key={months}
-                          onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
-                          className={`px-3 py-1 rounded text-sm font-medium ${
-                            timelineMonths === months
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                          }`}
-                        >
-                          {months} months
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="h-80">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={projectionData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis tick={{ fontSize: 10 }} />
-                        <Tooltip />
-                        <Legend />
-                        <Line type="monotone" dataKey="monthlyIncome" stroke="#22c55e" strokeWidth={2} name="Monthly Income" dot={false} />
-                        <Line type="monotone" dataKey="monthlyExpenses" stroke="#ef4444" strokeWidth={2} name="Monthly Expenses" dot={false} />
-                        <Line type="monotone" dataKey="cashInHand" stroke="#3b82f6" strokeWidth={2} name="Cash in Hand" dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-4 p-4 bg-gray-50 rounded">
-                    <h3 className="font-medium mb-2">Calculation Breakdown</h3>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-600">Current Monthly Income:</span>
-                        <span className="ml-2 font-medium text-green-600">₹{projectionData[0]?.monthlyIncome.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Current Monthly Expenses:</span>
-                        <span className="ml-2 font-medium text-red-600">₹{projectionData[0]?.monthlyExpenses.toLocaleString() || 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Cumulative Income ({timelineMonths}m):</span>
-                        <span className="ml-2 font-medium text-green-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0).toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Cumulative Expenses ({timelineMonths}m):</span>
-                        <span className="ml-2 font-medium text-red-600">₹{projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0).toLocaleString()}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Net Cash Flow ({timelineMonths}m):</span>
-                        <span className={`ml-2 font-medium ${projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          ₹{projectionData.reduce((sum, d) => sum + d.monthlyIncome - d.monthlyExpenses, 0).toLocaleString()}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Cash in Hand ({timelineMonths}m):</span>
-                        <span className={`ml-2 font-medium ${(projectionData[projectionData.length - 1]?.cashInHand || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          ₹{projectionData[projectionData.length - 1]?.cashInHand.toLocaleString() || 0}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Avg Monthly Income:</span>
-                        <span className="ml-2 font-medium text-green-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyIncome, 0) / timelineMonths).toLocaleString() : 0}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-600">Avg Monthly Expenses:</span>
-                        <span className="ml-2 font-medium text-red-600">₹{projectionData.length > 0 ? Math.round(projectionData.reduce((sum, d) => sum + d.monthlyExpenses, 0) / timelineMonths).toLocaleString() : 0}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
+              </div>
+            </div>
           </div>
         )}
       {deleteConfirmProperty && (
