@@ -208,8 +208,186 @@ export default function Home() {
   const [showOtherAssetsModal, setShowOtherAssetsModal] = useState(false);
   const [showInstallmentModal, setShowInstallmentModal] = useState(false);
   const [showIncomeExpenseModal, setShowIncomeExpenseModal] = useState(false);
+  const [showLoanConfigModal, setShowLoanConfigModal] = useState(false);
   const [modalIncomes, setModalIncomes] = useState<CashflowRow[]>([]);
   const [modalExpenses, setModalExpenses] = useState<CashflowRow[]>([]);
+  
+  const [loanConfig, setLoanConfig] = useState({
+    principalAmount: 0,
+    interestRate: 0,
+    tenureMonths: 0,
+    startDate: '',
+    isOverdraftLinked: false,
+    overdraftCashAmount: 0,
+    impactType: 'EMI' as 'EMI' | 'TENURE',
+    emiAmount: 0,
+    installments: [] as InstallmentDetail[],
+  });
+
+  const [modalInstallments, setModalInstallments] = useState<InstallmentDetail[]>([]);
+  const [isPreEMIMode, setIsPreEMIMode] = useState(false);
+
+  useEffect(() => {
+    if (loanConfig.principalAmount > 0 && loanConfig.interestRate > 0 && loanConfig.tenureMonths > 0) {
+      let emi = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths);
+      
+      if (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > 0) {
+        if (loanConfig.impactType === 'EMI') {
+          emi = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths, loanConfig.overdraftCashAmount, 'EMI');
+        } else {
+          const { adjustedTenure } = calculateEMIWithOverdraftTenure(
+            loanConfig.principalAmount,
+            loanConfig.interestRate,
+            loanConfig.tenureMonths,
+            loanConfig.overdraftCashAmount
+          );
+          emi = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, adjustedTenure);
+        }
+      }
+      
+      setLoanConfig(prev => ({ ...prev, emiAmount: emi }));
+    } else {
+      setLoanConfig(prev => ({ ...prev, emiAmount: 0 }));
+    }
+  }, [loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths, loanConfig.isOverdraftLinked, loanConfig.overdraftCashAmount, loanConfig.impactType]);
+
+  useEffect(() => {
+    if (isPreEMIMode && modalInstallments.length > 0) {
+      const preEMI = calculatePreEMI();
+      setLoanConfig(prev => ({ ...prev, emiAmount: preEMI }));
+    }
+  }, [modalInstallments, loanConfig.isOverdraftLinked, loanConfig.overdraftCashAmount, loanConfig.principalAmount, loanConfig.interestRate, isPreEMIMode]);
+
+  const calculateEMI = (principal: number, annualRate: number, tenure: number, overdraftAmount: number = 0, impactType: 'EMI' | 'TENURE' = 'EMI'): number => {
+    if (principal <= 0 || annualRate <= 0 || tenure <= 0) return 0;
+    
+    const monthlyRate = annualRate / 100 / 12;
+    let effectivePrincipal = principal;
+    
+    if (overdraftAmount > 0 && impactType === 'EMI') {
+      effectivePrincipal = Math.max(0, principal - overdraftAmount);
+    }
+    
+    if (effectivePrincipal <= 0) return 0;
+    
+    const emi = effectivePrincipal * monthlyRate * Math.pow(1 + monthlyRate, tenure) / (Math.pow(1 + monthlyRate, tenure) - 1);
+    return Math.round(emi * 100) / 100;
+  };
+
+  const calculateEMIWithOverdraftTenure = (principal: number, annualRate: number, tenure: number, overdraftAmount: number): { adjustedTenure: number; adjustedEMI: number } => {
+    if (principal <= 0 || annualRate <= 0 || tenure <= 0 || overdraftAmount <= 0) {
+      return { adjustedTenure: tenure, adjustedEMI: 0 };
+    }
+    
+    const monthlyRate = annualRate / 100 / 12;
+    const fullEMI = principal * monthlyRate * Math.pow(1 + monthlyRate, tenure) / (Math.pow(1 + monthlyRate, tenure) - 1);
+    
+    const interestPortion = principal * monthlyRate;
+    const principalPortion = fullEMI - interestPortion;
+    const monthsCoveredByOverdraft = overdraftAmount / principalPortion;
+    const adjustedTenure = Math.max(1, Math.round(tenure - monthsCoveredByOverdraft));
+    
+    const adjustedEMI = calculateEMI(principal, annualRate, adjustedTenure);
+    
+    return { adjustedTenure, adjustedEMI };
+  };
+
+  const calculatePreEMI = (): number => {
+    const today = new Date();
+    const bankDisbursedInstallments = modalInstallments.filter(inst => 
+      inst.paid_by === 'bank' && 
+      !inst.is_completed &&
+      new Date(inst.date) <= today
+    );
+    
+    let preEMI = 0;
+    for (const inst of bankDisbursedInstallments) {
+      if (inst.is_interest) {
+        const principal = loanConfig.principalAmount;
+        const monthlyRate = loanConfig.interestRate / 100 / 12;
+        const interestAmount = principal * monthlyRate;
+        preEMI += interestAmount;
+      } else {
+        preEMI += inst.amount;
+      }
+    }
+    
+    if (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > 0 && loanConfig.impactType === 'EMI') {
+      preEMI = Math.max(0, preEMI - loanConfig.overdraftCashAmount);
+    }
+    
+    return Math.round(preEMI * 100) / 100;
+  };
+
+  const handleHasLoanChange = (checked: boolean) => {
+    if (!checked) {
+      setLoanConfig({
+        principalAmount: 0,
+        interestRate: 0,
+        tenureMonths: 0,
+        startDate: '',
+        isOverdraftLinked: false,
+        overdraftCashAmount: 0,
+        impactType: 'EMI',
+        emiAmount: 0,
+        installments: [],
+      });
+    }
+    setFormData({ ...formData, has_loan: checked });
+  };
+
+  const handleOpenLoanConfig = () => {
+    const isUnderConstruction = formData.property_status === 'under_construction';
+    setIsPreEMIMode(isUnderConstruction);
+    setLoanConfig({
+      principalAmount: formData.loan_principal || 0,
+      interestRate: formData.loan_interest_rate || 0,
+      tenureMonths: formData.loan_tenure_months || 0,
+      startDate: formData.loan_start_date || '',
+      isOverdraftLinked: formData.has_overdraft || false,
+      overdraftCashAmount: formData.overdraft_amount || 0,
+      impactType: formData.overdraft_impact_type === 'reduce_tenure' ? 'TENURE' : 'EMI',
+      emiAmount: formData.loan_emi_amount || 0,
+      installments: formData.installments || [],
+    });
+    setModalInstallments(formData.installments && formData.installments.length > 0 
+      ? [...formData.installments] 
+      : [createEmptyInstallment()]);
+    setShowLoanConfigModal(true);
+  };
+
+  const handleSaveLoanConfig = () => {
+    let calculatedEMI = loanConfig.emiAmount;
+    
+    if (isPreEMIMode) {
+      calculatedEMI = calculatePreEMI();
+    } else if (loanConfig.principalAmount > 0 && loanConfig.interestRate > 0 && loanConfig.tenureMonths > 0) {
+      if (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > 0 && loanConfig.impactType === 'EMI') {
+        calculatedEMI = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths, loanConfig.overdraftCashAmount, 'EMI');
+      } else if (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > 0 && loanConfig.impactType === 'TENURE') {
+        const fullEMI = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths);
+        calculatedEMI = fullEMI;
+      } else {
+        calculatedEMI = calculateEMI(loanConfig.principalAmount, loanConfig.interestRate, loanConfig.tenureMonths);
+      }
+    }
+    
+    const validInstallments = modalInstallments.filter(inst => inst.name && inst.amount > 0 && inst.date);
+    
+    setFormData({
+      ...formData,
+      loan_principal: loanConfig.principalAmount,
+      loan_interest_rate: loanConfig.interestRate,
+      loan_tenure_months: loanConfig.tenureMonths,
+      loan_start_date: loanConfig.startDate,
+      loan_emi_amount: calculatedEMI,
+      has_overdraft: loanConfig.isOverdraftLinked,
+      overdraft_amount: loanConfig.overdraftCashAmount,
+      overdraft_impact_type: loanConfig.impactType === 'TENURE' ? 'reduce_tenure' : 'reduce_emi',
+      installments: isPreEMIMode ? validInstallments : [],
+    });
+    setShowLoanConfigModal(false);
+  };
 
   useEffect(() => {
     fetchProperties();
@@ -778,17 +956,6 @@ export default function Home() {
                       <option value="under_construction">Under Construction</option>
                     </select>
                   </div>
-                  {formData.property_status === 'under_construction' && (
-                    <div className="md:col-span-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowInstallmentModal(true)}
-                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
-                      >
-                        Configure Installments & Expenses
-                      </button>
-                    </div>
-                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700">Purchase Date</label>
                     <input
@@ -853,93 +1020,54 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={formData.has_loan}
-                    onChange={(e) => setFormData({ ...formData, has_loan: e.target.checked })}
+                    onChange={(e) => handleHasLoanChange(e.target.checked)}
                     className="mr-2"
                   />
                   <label className="text-sm font-medium text-gray-700">Has Loan</label>
                 </div>
                 {formData.has_loan && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Principal Amount</label>
-                      <input
-                        type="number"
-                        value={formData.loan_principal}
-                        onChange={(e) => setFormData({ ...formData, loan_principal: Number(e.target.value) })}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Interest Rate (%)</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={formData.loan_interest_rate}
-                        onChange={(e) => setFormData({ ...formData, loan_interest_rate: Number(e.target.value) })}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Tenure (Months)</label>
-                      <input
-                        type="number"
-                        value={formData.loan_tenure_months}
-                        onChange={(e) => setFormData({ ...formData, loan_tenure_months: Number(e.target.value) })}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">EMI Amount</label>
-                      <input
-                        type="number"
-                        value={formData.loan_emi_amount}
-                        onChange={(e) => setFormData({ ...formData, loan_emi_amount: Number(e.target.value) })}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700">Start Date</label>
-                      <input
-                        type="date"
-                        value={formData.loan_start_date}
-                        onChange={(e) => setFormData({ ...formData, loan_start_date: e.target.value })}
-                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                      />
-                    </div>
-                    <div className="col-span-1 md:col-span-2 mt-4">
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={formData.has_overdraft}
-                          onChange={(e) => setFormData({ ...formData, has_overdraft: e.target.checked })}
-                          className="mr-2"
-                        />
-                        <label className="text-sm font-medium text-gray-700">Has Overdraft Account</label>
+                  <div className="space-y-4">
+                    <button
+                      type="button"
+                      onClick={handleOpenLoanConfig}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium"
+                    >
+                      Configure Installments & Expenses
+                    </button>
+                    {formData.loan_emi_amount > 0 && (
+                      <div className="bg-green-50 border border-green-200 rounded-lg p-4 mt-4">
+                        <h4 className="font-medium text-green-800 mb-2">EMI Summary</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-600">Principal:</span>
+                            <span className="ml-2 font-medium">₹{formData.loan_principal.toLocaleString()}</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Interest Rate:</span>
+                            <span className="ml-2 font-medium">{formData.loan_interest_rate}%</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Tenure:</span>
+                            <span className="ml-2 font-medium">{formData.loan_tenure_months} months</span>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">EMI:</span>
+                            <span className="ml-2 font-medium text-green-700">₹{formData.loan_emi_amount.toLocaleString()}</span>
+                          </div>
+                          {formData.has_overdraft && (
+                            <>
+                              <div>
+                                <span className="text-gray-600">Overdraft:</span>
+                                <span className="ml-2 font-medium">₹{formData.overdraft_amount.toLocaleString()}</span>
+                              </div>
+                              <div>
+                                <span className="text-gray-600">Impact:</span>
+                                <span className="ml-2 font-medium">{formData.overdraft_impact_type === 'reduce_emi' ? 'Reduced EMI' : 'Reduced Tenure'}</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    {formData.has_overdraft && (
-                      <>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">Overdraft Amount (Cash maintained)</label>
-                          <input
-                            type="number"
-                            value={formData.overdraft_amount}
-                            onChange={(e) => setFormData({ ...formData, overdraft_amount: Number(e.target.value) })}
-                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700">Impact Type</label>
-                          <select
-                            value={formData.overdraft_impact_type}
-                            onChange={(e) => setFormData({ ...formData, overdraft_impact_type: e.target.value })}
-                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                          >
-                            <option value="reduce_emi">Reduce EMI (same tenure)</option>
-                            <option value="reduce_tenure">Reduce Tenure (same EMI)</option>
-                          </select>
-                        </div>
-                      </>
                     )}
                   </div>
                 )}
@@ -2126,6 +2254,253 @@ export default function Home() {
                     setShowIncomeExpenseModal(false);
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showLoanConfigModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <h2 className="text-xl font-semibold mb-4">Loan Configuration</h2>
+              
+              <div className="space-y-4">
+                <h3 className="font-medium text-gray-700 border-b pb-2">Core Loan Details</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Principal Amount (₹)</label>
+                    <input
+                      type="number"
+                      value={loanConfig.principalAmount || ''}
+                      onChange={(e) => setLoanConfig({ ...loanConfig, principalAmount: Number(e.target.value) })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                      placeholder="Enter principal amount"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Interest Rate (% p.a.)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={loanConfig.interestRate || ''}
+                      onChange={(e) => setLoanConfig({ ...loanConfig, interestRate: Number(e.target.value) })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                      placeholder="Annual interest rate"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Tenure (Months)</label>
+                    <input
+                      type="number"
+                      value={loanConfig.tenureMonths || ''}
+                      onChange={(e) => setLoanConfig({ ...loanConfig, tenureMonths: Number(e.target.value) })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                      placeholder="Tenure in months"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Start Date</label>
+                    <input
+                      type="date"
+                      value={loanConfig.startDate}
+                      onChange={(e) => setLoanConfig({ ...loanConfig, startDate: e.target.value })}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                    />
+                  </div>
+                </div>
+
+                <h3 className="font-medium text-gray-700 border-b pb-2 mt-6">Overdraft Configuration</h3>
+                <div className="flex items-center mb-4">
+                  <input
+                    type="checkbox"
+                    checked={loanConfig.isOverdraftLinked}
+                    onChange={(e) => setLoanConfig({ ...loanConfig, isOverdraftLinked: e.target.checked })}
+                    className="mr-2"
+                  />
+                  <label className="text-sm font-medium text-gray-700">Link Overdraft Account</label>
+                </div>
+
+                {loanConfig.isOverdraftLinked && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Overdraft Cash Amount (₹)</label>
+                      <input
+                        type="number"
+                        value={loanConfig.overdraftCashAmount || ''}
+                        onChange={(e) => setLoanConfig({ ...loanConfig, overdraftCashAmount: Number(e.target.value) })}
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                        placeholder="Enter overdraft amount"
+                      />
+                      {loanConfig.principalAmount > 0 && loanConfig.overdraftCashAmount > loanConfig.principalAmount && (
+                        <p className="text-red-500 text-sm mt-1">Overdraft cannot exceed principal amount</p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Impact Type</label>
+                      <select
+                        value={loanConfig.impactType}
+                        onChange={(e) => setLoanConfig({ ...loanConfig, impactType: e.target.value as 'EMI' | 'TENURE' })}
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
+                      >
+                        <option value="EMI">Reduce EMI</option>
+                        <option value="TENURE">Reduce Tenure</option>
+                      </select>
+                    </div>
+                    <p className="text-sm text-blue-700">
+                      {loanConfig.impactType === 'EMI' 
+                        ? 'Overdraft amount will reduce the principal for EMI calculation'
+                        : 'Full principal used for EMI, tenure reduced proportionally'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mt-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-purple-800">
+                      {isPreEMIMode ? 'Calculated Pre-EMI:' : 'Calculated EMI:'}
+                    </span>
+                    <span className="text-lg font-bold text-purple-900">
+                      ₹{(isPreEMIMode ? calculatePreEMI() : loanConfig.emiAmount).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-purple-600 mt-1">
+                    {isPreEMIMode
+                      ? 'Pre-EMI: Bank disbursed past installments + interest component'
+                      : loanConfig.isOverdraftLinked && loanConfig.impactType === 'EMI'
+                      ? 'EMI calculated on reduced principal (principal - overdraft)'
+                      : loanConfig.isOverdraftLinked && loanConfig.impactType === 'TENURE'
+                      ? 'EMI calculated on full principal with adjusted tenure'
+                      : 'Standard EMI calculation'}
+                  </p>
+                </div>
+
+                {isPreEMIMode && (
+                  <div className="mt-6">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-medium text-gray-700 border-b pb-2">Installments (Pre-EMI Period)</h3>
+                      <button
+                        type="button"
+                        onClick={() => setModalInstallments([...modalInstallments, createEmptyInstallment()])}
+                        className="px-3 py-1 bg-green-600 text-white rounded text-sm hover:bg-green-700"
+                      >
+                        + Add Installment
+                      </button>
+                    </div>
+                    
+                    {modalInstallments.map((inst, index) => (
+                      <div key={inst.id} className="bg-gray-50 rounded-lg p-4 mb-4">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600">Name</label>
+                            <input
+                              type="text"
+                              value={inst.name}
+                              onChange={(e) => {
+                                const updated = [...modalInstallments];
+                                updated[index].name = e.target.value;
+                                setModalInstallments(updated);
+                              }}
+                              className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                              placeholder="e.g., Installment 1"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600">Amount (₹)</label>
+                            <input
+                              type="number"
+                              value={inst.amount || ''}
+                              onChange={(e) => {
+                                const updated = [...modalInstallments];
+                                updated[index].amount = Number(e.target.value);
+                                setModalInstallments(updated);
+                              }}
+                              className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                              placeholder="Amount"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600">Date</label>
+                            <input
+                              type="date"
+                              value={inst.date}
+                              onChange={(e) => {
+                                const updated = [...modalInstallments];
+                                updated[index].date = e.target.value;
+                                setModalInstallments(updated);
+                              }}
+                              className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600">Paid By</label>
+                            <select
+                              value={inst.paid_by}
+                              onChange={(e) => {
+                                const updated = [...modalInstallments];
+                                updated[index].paid_by = e.target.value as PaidBy;
+                                setModalInstallments(updated);
+                              }}
+                              className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                            >
+                              <option value="individual">Self</option>
+                              <option value="bank">Bank</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600">Type</label>
+                            <div className="flex items-center gap-2 mt-1">
+                              <select
+                                value={inst.is_interest ? 'interest' : 'principal'}
+                                onChange={(e) => {
+                                  const updated = [...modalInstallments];
+                                  updated[index].is_interest = e.target.value === 'interest';
+                                  setModalInstallments(updated);
+                                }}
+                                className="block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                              >
+                                <option value="principal">Principal</option>
+                                <option value="interest">Interest Only</option>
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = modalInstallments.filter((_, i) => i !== index);
+                                  setModalInstallments(updated.length > 0 ? updated : [createEmptyInstallment()]);
+                                }}
+                                className="text-red-600 hover:text-red-800 text-sm px-2"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mt-4">
+                      <p className="text-sm text-blue-800">
+                        <strong>Note:</strong> Only bank-disbursed installments up to today are considered for pre-EMI calculation. 
+                        Interest-only installments calculate interest on full principal.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => setShowLoanConfigModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSaveLoanConfig()}
+                  disabled={!loanConfig.principalAmount || !loanConfig.interestRate || !loanConfig.tenureMonths || !loanConfig.startDate || (loanConfig.isOverdraftLinked && loanConfig.overdraftCashAmount > loanConfig.principalAmount)}
+                  className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
                 >
                   Save
                 </button>
