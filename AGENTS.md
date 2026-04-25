@@ -10,25 +10,28 @@
 
 ## Commands
 
-- **Frontend dev**: `cd frontend && npm run dev`
+- **Frontend dev**: `cd frontend && npm run dev` (port 3000)
 - **Frontend build**: `cd frontend && npm run build`
 - **Frontend lint**: `cd frontend && npm run lint`
-- **Backend dev**: `cd backend && source venv/bin/activate && python main.py` (runs on port 8000)
+- **Backend dev**: `cd backend && source venv/bin/activate && python main.py` (port 8000)
+- **Backend API docs**: http://localhost:8000/docs
 
-## First Steps for Agents
+## Developer Workflow
 
 1. **Always read `PROJECT.md`** before writing code — it contains the spec and domain model
-2. Next.js 16.x has breaking changes from older versions — APIs and file structure differ from training data. Check `node_modules/next/dist/docs/` for details
-3. Tailwind CSS v4 uses CSS-first config, not `tailwind.config.js` — styles are in CSS files
+2. Next.js 16.x has breaking changes from older versions. Check `node_modules/next/dist/docs/` for details
+3. Tailwind CSS v4 uses CSS-first config in CSS files, not `tailwind.config.js`
 4. Frontend uses ESLint flat config: `eslint.config.mjs`
 
-## Domain Model (Release 1)
+## API Endpoints
 
-- **Person** → owner of financial profile
-- **Property** → may contribute to assets, liabilities, income, expenses
-- **Loan** → linked liability (EMI/pre-EMI/overdraft styles)
-- **CashflowSchedule** → recurring or one-time income/expense tied to property
-- **Event** → dated events: possession, installment, sale, rent start/stop, loan closure
+- `POST /persons/` — create person
+- `GET /persons/` — list persons
+- `POST /properties/` — create property with loan, cashflow schedules, events
+- `GET /properties/` — list all properties
+- `GET /properties/{id}` — get single property
+- `PUT /properties/{id}` — update property
+- `DELETE /properties/{id}` — delete property
 
 ## Release 1 Exclusions (do not implement)
 
@@ -38,14 +41,3 @@
 - household budgeting beyond property-linked cashflow
 - scenario comparison UI beyond a single base projection
 - advanced portfolio analytics
-
-## Testing & CI
-
-- No tests configured yet
-- No CI/CD pipelines yet
-- Establish testing and lint checks after adding significant code
-
-## Database
-
-- SQLite at `backend/financial_monitor.db`
-- SQLAlchemy ORM with auto-created tables on backend startup

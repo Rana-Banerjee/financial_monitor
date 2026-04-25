@@ -686,15 +686,18 @@ export default function Home() {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const data = [];
     const currentDate = new Date();
-    const currentMonthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
     const startYear = currentDate.getFullYear();
     const startMonth = currentDate.getMonth();
 
     let cashInHand = 0;
 
     let initialLiquidAssets = 0;
+    let initialOverdraftAssets = 0;
     const propertyValuations: Record<number, number> = {};
     const loanBalances: Record<number, number> = {};
+    const possessionMonthIndex: Record<number, number> = {};
+    const remainingTenureAtPossession: Record<number, number> = {};
+    const emiAdjustedForOverdraft: Record<number, number> = {};
     const otherAssetValues: Record<string, number> = {};
     otherAssets.forEach(a => {
       if (a.included && a.is_liquid) {
@@ -706,8 +709,12 @@ export default function Home() {
 
     properties.forEach(p => {
       if (!excludedPropertyIds.includes(p.id) && p.loan) {
-        const paidInstallments = (p.installments || []).filter(inst => inst.is_completed && inst.paid_by === 'bank').length;
-        const totalDisbursed = (p.installments || []).reduce((sum, inst) => 
+        const possessionDate = p.possession_date ? new Date(p.possession_date) : null;
+        if (possessionDate) {
+          possessionMonthIndex[p.id] = (possessionDate.getFullYear() - startYear) * 12 + (possessionDate.getMonth() - startMonth);
+        }
+
+        const totalDisbursed = (p.installments || []).reduce((sum, inst) =>
           inst.is_completed && inst.paid_by === 'bank' ? sum + inst.amount : sum, 0
         );
         if (totalDisbursed > 0) {
@@ -715,15 +722,36 @@ export default function Home() {
         } else {
           loanBalances[p.id] = p.loan.principal;
         }
+
+        if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
+          initialOverdraftAssets += p.loan.overdraft_account.overdraft_amount;
+          const odAmount = p.loan.overdraft_account.overdraft_amount;
+          const impactType = p.loan.overdraft_account.impact_type;
+          if (impactType === 'reduce_emi') {
+            const adjustedPrincipal = Math.max(0, p.loan.principal - odAmount);
+            if (adjustedPrincipal > 0 && p.loan.interest_rate > 0 && p.loan.tenure_months > 0) {
+              emiAdjustedForOverdraft[p.id] = calculateEMI(adjustedPrincipal, p.loan.interest_rate, p.loan.tenure_months);
+            }
+          } else {
+            emiAdjustedForOverdraft[p.id] = p.loan.emi_amount;
+          }
+        } else {
+          emiAdjustedForOverdraft[p.id] = p.loan.emi_amount;
+        }
+
+        if (possessionDate) {
+          remainingTenureAtPossession[p.id] = p.loan.tenure_months;
+        }
       }
     });
+    cashInHand += initialOverdraftAssets;
 
-    const getMonthIndex = (date: Date) => {
+    const getMonthIndexFromDate = (date: Date) => {
       return (date.getFullYear() - startYear) * 12 + (date.getMonth() - startMonth);
     };
 
     for (let i = 0; i < timelineMonths; i++) {
-      const projectionDate = new Date(startYear, startMonth + i, 1);
+      const _projectionDate = new Date(startYear, startMonth + i, 1);
       const year = Math.floor((startMonth + i) / 12);
       const month = monthNames[(startMonth + i) % 12];
       const label = `${month} ${startYear + year}`;
@@ -743,69 +771,71 @@ export default function Home() {
         monthlyAssets += newValuation;
 
         if (p.loan && p.loan.principal > 0) {
-          const loanStart = p.loan.start_date ? new Date(p.loan.start_date) : new Date(startYear, startMonth, 1);
+          const loanStart = p.loan.start_date ? new Date(p.loan.start_date) : null;
           const possessionDate = p.possession_date ? new Date(p.possession_date) : null;
-          
-          const monthsSinceLoanStart = getMonthIndex(loanStart);
-          const monthsUntilPossession = possessionDate ? getMonthIndex(possessionDate) - i : Infinity;
-          
-          const isPreEmiPeriod = possessionDate && i < monthsUntilPossession;
-          const isAfterPossession = !possessionDate || i >= monthsUntilPossession;
+          const monthsSinceLoanStart = loanStart ? getMonthIndexFromDate(loanStart) : 0;
+          const monthsUntilPossession = possessionDate ? getMonthIndexFromDate(possessionDate) : Infinity;
+
+          const isPreEmiPeriod = i < monthsUntilPossession;
+          const isPossessionMonth = i === monthsUntilPossession;
+          const isPostPossession = i > monthsUntilPossession;
           const isLoanActive = i >= monthsSinceLoanStart && i < monthsSinceLoanStart + p.loan.tenure_months;
-          
-          let currentLoanBalance = loanBalances[p.id] || p.loan.principal;
+
+          const currentLoanBalance = loanBalances[p.id] || p.loan.principal;
           const interestRate = p.loan.interest_rate / 100 / 12;
-          
-          if (isLoanActive) {
-            const interestComponent = currentLoanBalance * interestRate;
-            let emiAmount = p.loan.emi_amount;
-            
-            if (isPreEmiPeriod) {
-              monthlyExpenses += interestComponent;
-              monthlyLiabilities += currentLoanBalance;
-            } else if (isAfterPossession) {
-              let principalComponent = emiAmount - interestComponent;
-              if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
-                const overdraftAmt = p.loan.overdraft_account.overdraft_amount;
-                const impactType = p.loan.overdraft_account.impact_type;
-                
-                if (impactType === 'reduce_emi') {
-                  const adjustedPrincipal = Math.max(0, currentLoanBalance - overdraftAmt);
-                  if (adjustedPrincipal > 0) {
-                    const reducedInterest = adjustedPrincipal * interestRate;
-                    const reducedPrincipal = emiAmount - reducedInterest;
-                    if (reducedPrincipal > 0) {
-                      principalComponent = reducedPrincipal;
-                    }
-                  }
-                }
+
+          if (isPreEmiPeriod && !isPossessionMonth) {
+            monthlyExpenses += currentLoanBalance * interestRate;
+            monthlyLiabilities += currentLoanBalance;
+          } else if (isPossessionMonth) {
+            const remainingTenure = remainingTenureAtPossession[p.id] || p.loan.tenure_months;
+            let possessionEMI = emiAdjustedForOverdraft[p.id] || p.loan.emi_amount;
+            if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
+              const odAmount = p.loan.overdraft_account.overdraft_amount;
+              const impactType = p.loan.overdraft_account.impact_type;
+              if (impactType === 'reduce_tenure') {
+                const { adjustedEMI } = calculateEMIWithOverdraftTenure(
+                  currentLoanBalance, p.loan.interest_rate, remainingTenure, odAmount
+                );
+                possessionEMI = adjustedEMI;
               }
-              
-              const newBalance = Math.max(0, currentLoanBalance - principalComponent);
-              loanBalances[p.id] = newBalance;
-              monthlyLiabilities += newBalance;
-              monthlyExpenses += emiAmount;
             }
+            const interestComponent = currentLoanBalance * interestRate;
+            const principalComponent = possessionEMI - interestComponent;
+            const newBalance = Math.max(0, currentLoanBalance - principalComponent);
+            loanBalances[p.id] = newBalance;
+            monthlyLiabilities += newBalance;
+            monthlyExpenses += possessionEMI;
+          } else if (isPostPossession && isLoanActive) {
+            const emiAmount = emiAdjustedForOverdraft[p.id] || p.loan.emi_amount;
+            const interestComponent = currentLoanBalance * interestRate;
+            const principalComponent = emiAmount - interestComponent;
+            const newBalance = Math.max(0, currentLoanBalance - principalComponent);
+            loanBalances[p.id] = newBalance;
+            monthlyLiabilities += newBalance;
+            monthlyExpenses += emiAmount;
           } else if (currentLoanBalance > 0) {
             monthlyLiabilities += currentLoanBalance;
           }
+        }
+
+        if (p.loan && p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0 && !excludedPropertyIds.includes(p.id)) {
+          monthlyAssets += p.loan.overdraft_account.overdraft_amount;
         }
 
         const installments = p.installments || [];
         installments.forEach(inst => {
           if (!inst.date || !inst.name || inst.amount <= 0) return;
           const instDate = new Date(inst.date);
-          const instMonthIndex = getMonthIndex(instDate);
-          
-          if (instMonthIndex === i) {
+          const instMonthIndex = getMonthIndexFromDate(instDate);
+
+          if (instMonthIndex === i && instMonthIndex >= 0) {
             if (inst.paid_by === 'individual') {
               if (inst.is_completed) {
                 monthlyExpenses += inst.amount;
-              } else {
-                monthlyExpenses += 0;
               }
             } else if (inst.paid_by === 'bank') {
-              if (inst.is_completed) {
+              if (inst.is_completed && instMonthIndex < (possessionMonthIndex[p.id] ?? Infinity)) {
                 if (loanBalances[p.id] !== undefined) {
                   loanBalances[p.id] += inst.amount;
                 }
@@ -818,8 +848,8 @@ export default function Home() {
         otherExpenses.forEach(exp => {
           if (!exp.date || !exp.name || exp.amount <= 0) return;
           const expDate = new Date(exp.date);
-          const expMonthIndex = getMonthIndex(expDate);
-          
+          const expMonthIndex = getMonthIndexFromDate(expDate);
+
           if (expMonthIndex === i && exp.paid_by === 'individual') {
             if (exp.is_completed) {
               monthlyExpenses += exp.amount;
@@ -830,8 +860,8 @@ export default function Home() {
         const cashflows = p.cashflow_schedules || [];
         cashflows.forEach((cf) => {
           const cfStart = cf.start_date ? new Date(cf.start_date) : null;
-          const monthsSinceCf = cfStart ? getMonthIndex(cfStart) : -1;
-          
+          const monthsSinceCf = cfStart ? getMonthIndexFromDate(cfStart) : -1;
+
           if (i >= monthsSinceCf || !cfStart) {
             let cfAmount = cf.amount;
             if (cf.frequency === 'quarterly') {
@@ -839,7 +869,7 @@ export default function Home() {
             } else if (cf.frequency === 'yearly') {
               cfAmount = cf.amount / 12;
             }
-            
+
             if (cf.is_income) {
               monthlyIncome += cfAmount;
             } else {
