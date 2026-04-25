@@ -695,6 +695,8 @@ export default function Home() {
     let initialOverdraftAssets = 0;
     const propertyValuations: Record<number, number> = {};
     const loanBalances: Record<number, number> = {};
+    const cumulativeDisbursements: Record<number, number> = {};
+    const cumulativeIndividualPayments: Record<number, number> = {};
     const possessionMonthIndex: Record<number, number> = {};
     const remainingTenureAtPossession: Record<number, number> = {};
     const emiAdjustedForOverdraft: Record<number, number> = {};
@@ -776,48 +778,56 @@ export default function Home() {
           const interestRate = p.loan.interest_rate / 100 / 12;
 
           if (isUnderConstruction) {
-            let cumulativeDisbursed = 0;
-            let preEmiInstallment = 0;
-            (p.installments || []).forEach(inst => {
-              if (inst.date && inst.paid_by === 'bank' && inst.is_completed) {
-                const instDate = new Date(inst.date);
-                const instMonthIndex = getMonthIndexFromDate(instDate);
-                if (instMonthIndex <= i && instMonthIndex >= 0) {
-                  cumulativeDisbursed += inst.amount;
-                }
-                if (instMonthIndex === i) {
-                  preEmiInstallment += inst.amount;
-                }
+            const totalPrincipal = p.loan.principal;
+            let effectiveEMI = emiAdjustedForOverdraft[p.id] || p.loan.emi_amount;
+            if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
+              const odAmount = p.loan.overdraft_account.overdraft_amount;
+              if (p.loan.overdraft_account.impact_type === 'reduce_tenure') {
+                const remainingTenure = remainingTenureAtPossession[p.id] || p.loan.tenure_months;
+                const { adjustedEMI } = calculateEMIWithOverdraftTenure(
+                  totalPrincipal, p.loan.interest_rate, remainingTenure, odAmount
+                );
+                effectiveEMI = adjustedEMI;
               }
-            });
+            }
 
-            if (isPreEmiPeriod && !isPossessionMonth) {
-              loanBalances[p.id] = cumulativeDisbursed;
-              monthlyLiabilities += cumulativeDisbursed;
-              monthlyExpenses += cumulativeDisbursed * interestRate;
-              monthlyExpenses += preEmiInstallment;
+            if (isPreEmiPeriod && !isPossessionMonth && isFinite(monthsUntilPossession)) {
+              const disbursedPrincipal = cumulativeDisbursements[p.id] || 0;
+              loanBalances[p.id] = totalPrincipal;
+              monthlyLiabilities += totalPrincipal;
+              monthlyExpenses += effectiveEMI;
             } else if (isPossessionMonth) {
               const remainingTenure = remainingTenureAtPossession[p.id] || p.loan.tenure_months;
               let possessionEMI = emiAdjustedForOverdraft[p.id] || p.loan.emi_amount;
               if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
                 const odAmount = p.loan.overdraft_account.overdraft_amount;
-                const impactType = p.loan.overdraft_account.impact_type;
-                if (impactType === 'reduce_tenure') {
+                if (p.loan.overdraft_account.impact_type === 'reduce_tenure') {
                   const { adjustedEMI } = calculateEMIWithOverdraftTenure(
-                    cumulativeDisbursed, p.loan.interest_rate, remainingTenure, odAmount
+                    totalPrincipal, p.loan.interest_rate, remainingTenure, odAmount
                   );
                   possessionEMI = adjustedEMI;
                 }
               }
-              loanBalances[p.id] = cumulativeDisbursed;
-              const interestComponent = cumulativeDisbursed * interestRate;
+              const interestComponent = totalPrincipal * interestRate;
               const principalComponent = possessionEMI - interestComponent;
-              const newBalance = Math.max(0, cumulativeDisbursed - principalComponent);
+              const newBalance = Math.max(0, totalPrincipal - principalComponent);
               loanBalances[p.id] = newBalance;
               monthlyLiabilities += newBalance;
               monthlyExpenses += possessionEMI;
             } else {
-              monthlyLiabilities += loanBalances[p.id] || 0;
+              const currentLoanBalance = loanBalances[p.id] || totalPrincipal;
+              if (isPostPossession && isLoanActive) {
+                const emiAmount = emiAdjustedForOverdraft[p.id] || p.loan.emi_amount;
+                const interestComponent = currentLoanBalance * interestRate;
+                const principalComponent = emiAmount - interestComponent;
+                const newBalance = Math.max(0, currentLoanBalance - principalComponent);
+                loanBalances[p.id] = newBalance;
+                monthlyLiabilities += newBalance;
+                monthlyExpenses += emiAmount;
+              } else if (currentLoanBalance > 0) {
+                loanBalances[p.id] = currentLoanBalance;
+                monthlyLiabilities += currentLoanBalance;
+              }
             }
           } else {
             let currentLoanBalance = loanBalances[p.id] || p.loan.principal;
