@@ -20,6 +20,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+
+def parse_date_str(v):
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        return datetime.strptime(v, "%Y-%m-%d").date()
+    return None
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -41,6 +52,12 @@ class PropertyType(PyEnum):
     UNDER_CONSTRUCTION = "under_construction"
 
 
+class PropertyStatus(PyEnum):
+    READY_TO_MOVE_IN = "ready_to_move_in"
+    UNDER_CONSTRUCTION = "under_construction"
+    RENTAL = "rental"
+
+
 class Person(Base):
     __tablename__ = "persons"
     id = Column(Integer, primary_key=True, index=True)
@@ -53,6 +70,9 @@ class Property(Base):
     person_id = Column(Integer, ForeignKey("persons.id"), nullable=False)
     name = Column(String, nullable=False)
     property_type = Column(Enum(PropertyType), nullable=False)
+    property_status = Column(
+        Enum(PropertyStatus), default=PropertyStatus.READY_TO_MOVE_IN
+    )
     purchase_date = Column(Date, nullable=True)
     possession_date = Column(Date, nullable=True)
     purchase_price = Column(Float, default=0)
@@ -65,16 +85,8 @@ class Property(Base):
     loans = relationship("Loan", back_populates="property")
     cashflow_schedules = relationship("CashflowSchedule", back_populates="property")
     events = relationship("Event", back_populates="property")
-
-
-class OverdraftAccount(Base):
-    __tablename__ = "overdraft_accounts"
-    id = Column(Integer, primary_key=True, index=True)
-    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
-    overdraft_amount = Column(Float, default=0)
-    impact_type = Column(String, default="reduce_emi")
-
-    loan = relationship("Loan", back_populates="overdraft_account")
+    installments = relationship("Installment", back_populates="property")
+    other_expenses = relationship("OtherExpense", back_populates="property")
 
 
 class Loan(Base):
@@ -92,6 +104,33 @@ class Loan(Base):
     overdraft_account = relationship(
         "OverdraftAccount", back_populates="loan", uselist=False
     )
+
+
+class Installment(Base):
+    __tablename__ = "installments"
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
+    name = Column(String, nullable=False)
+    amount = Column(Float, default=0)
+    date = Column(Date, nullable=True)
+    paid_by = Column(String, default="individual")
+    is_interest = Column(Integer, default=0)
+    is_completed = Column(Integer, default=0)
+
+    property = relationship("Property", back_populates="installments")
+
+
+class OtherExpense(Base):
+    __tablename__ = "other_expenses"
+    id = Column(String, primary_key=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False)
+    name = Column(String, nullable=False)
+    amount = Column(Float, default=0)
+    date = Column(Date, nullable=True)
+    paid_by = Column(String, default="individual")
+    is_completed = Column(Integer, default=0)
+
+    property = relationship("Property", back_populates="other_expenses")
 
 
 class CashflowSchedule(Base):
@@ -117,6 +156,16 @@ class Event(Base):
     description = Column(String, nullable=True)
 
     property = relationship("Property", back_populates="events")
+
+
+class OverdraftAccount(Base):
+    __tablename__ = "overdraft_accounts"
+    id = Column(Integer, primary_key=True, index=True)
+    loan_id = Column(Integer, ForeignKey("loans.id"), nullable=False)
+    overdraft_amount = Column(Float, default=0)
+    impact_type = Column(String, default="reduce_emi")
+
+    loan = relationship("Loan", back_populates="overdraft_account")
 
 
 Base.metadata.create_all(bind=engine)
@@ -160,9 +209,28 @@ class EventCreate(BaseModel):
     description: Optional[str] = None
 
 
+class OtherExpenseCreate(BaseModel):
+    id: str
+    name: str
+    amount: float = 0
+    date: Optional[str] = None
+    paid_by: str = "individual"
+    is_completed: bool = False
+
+
+class InstallmentCreate(BaseModel):
+    name: str
+    amount: float = 0
+    date: Optional[str] = None
+    paid_by: str = "individual"
+    is_interest: bool = False
+    is_completed: bool = False
+
+
 class PropertyCreate(BaseModel):
     name: str
     property_type: PropertyType
+    property_status: PropertyStatus = PropertyStatus.READY_TO_MOVE_IN
     purchase_date: Optional[date] = None
     possession_date: Optional[date] = None
     purchase_price: float = 0
@@ -172,6 +240,8 @@ class PropertyCreate(BaseModel):
     loan: Optional[LoanCreate] = None
     cashflow_schedules: Optional[List[CashflowScheduleCreate]] = []
     events: Optional[List[EventCreate]] = []
+    installments: Optional[List[InstallmentCreate]] = []
+    other_expenses: Optional[List[OtherExpenseCreate]] = []
 
 
 class PropertyResponse(PropertyCreate):
@@ -180,6 +250,8 @@ class PropertyResponse(PropertyCreate):
     loan: Optional[LoanCreate] = None
     cashflow_schedules: List[CashflowScheduleCreate] = []
     events: List[EventCreate] = []
+    installments: List[InstallmentCreate] = []
+    other_expenses: List[OtherExpenseCreate] = []
 
 
 def get_db():
@@ -209,6 +281,7 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
     db_property = Property(
         name=property.name,
         property_type=property.property_type,
+        property_status=property.property_status,
         purchase_date=property.purchase_date,
         possession_date=property.possession_date,
         purchase_price=property.purchase_price,
@@ -266,6 +339,30 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
         )
         db.add(db_event)
 
+    for inst in property.installments:
+        db_inst = Installment(
+            property_id=db_property.id,
+            name=inst.name,
+            amount=inst.amount,
+            date=parse_date_str(inst.date),
+            paid_by=inst.paid_by,
+            is_interest=int(inst.is_interest),
+            is_completed=int(inst.is_completed),
+        )
+        db.add(db_inst)
+
+    for exp in property.other_expenses or []:
+        db_exp = OtherExpense(
+            property_id=db_property.id,
+            id=exp.id,
+            name=exp.name,
+            amount=exp.amount,
+            date=parse_date_str(exp.date),
+            paid_by=exp.paid_by,
+            is_completed=int(exp.is_completed),
+        )
+        db.add(db_exp)
+
     db.commit()
 
     loan_data = None
@@ -292,14 +389,20 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
         .all()
     )
 
+    db_insts = (
+        db.query(Installment).filter(Installment.property_id == db_property.id).all()
+    )
+
     return PropertyResponse(
         id=db_property.id,
         name=db_property.name,
         property_type=db_property.property_type,
+        property_status=db_property.property_status,
         purchase_date=db_property.purchase_date,
         possession_date=db_property.possession_date,
         purchase_price=db_property.purchase_price,
         current_valuation=db_property.current_valuation,
+        appreciation_rate=db_property.appreciation_rate,
         is_primary_residence=bool(db_property.is_primary_residence),
         last_updated=db_property.last_updated,
         loan=loan_data,
@@ -315,6 +418,18 @@ def create_property(property: PropertyCreate, db: Session = Depends(get_db)):
             for cf in db_cfs
         ],
         events=[],
+        installments=[
+            InstallmentCreate(
+                name=inst.name,
+                amount=inst.amount,
+                date=str(inst.date) if inst.date else None,
+                paid_by=inst.paid_by,
+                is_interest=bool(inst.is_interest),
+                is_completed=bool(inst.is_completed),
+            )
+            for inst in db_insts
+        ],
+        other_expenses=[],
     )
 
 
@@ -329,6 +444,10 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
         db.query(CashflowSchedule).filter(CashflowSchedule.property_id == p.id).all()
     )
     events = db.query(Event).filter(Event.property_id == p.id).all()
+    installments = db.query(Installment).filter(Installment.property_id == p.id).all()
+    other_expenses = (
+        db.query(OtherExpense).filter(OtherExpense.property_id == p.id).all()
+    )
 
     loan_data = None
     if loans:
@@ -356,6 +475,7 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
         id=p.id,
         name=p.name,
         property_type=p.property_type,
+        property_status=p.property_status,
         purchase_date=p.purchase_date,
         possession_date=p.possession_date,
         purchase_price=p.purchase_price,
@@ -383,6 +503,28 @@ def get_property(property_id: int, db: Session = Depends(get_db)):
             )
             for e in events
         ],
+        installments=[
+            InstallmentCreate(
+                name=inst.name,
+                amount=inst.amount,
+                date=str(inst.date) if inst.date else None,
+                paid_by=inst.paid_by,
+                is_interest=bool(inst.is_interest),
+                is_completed=bool(inst.is_completed),
+            )
+            for inst in installments
+        ],
+        other_expenses=[
+            OtherExpenseCreate(
+                id=exp.id,
+                name=exp.name,
+                amount=exp.amount,
+                date=str(exp.date) if exp.date else None,
+                paid_by=exp.paid_by,
+                is_completed=bool(exp.is_completed),
+            )
+            for exp in other_expenses
+        ],
     )
 
 
@@ -396,6 +538,7 @@ def update_property(
 
     db_property.name = property.name
     db_property.property_type = property.property_type
+    db_property.property_status = property.property_status
     db_property.purchase_date = property.purchase_date
     db_property.possession_date = property.possession_date
     db_property.purchase_price = property.purchase_price
@@ -409,6 +552,8 @@ def update_property(
         CashflowSchedule.property_id == property_id
     ).delete()
     db.query(Event).filter(Event.property_id == property_id).delete()
+    db.query(Installment).filter(Installment.property_id == property_id).delete()
+    db.query(OtherExpense).filter(OtherExpense.property_id == property_id).delete()
 
     if property.loan:
         db_loan = Loan(
@@ -453,6 +598,30 @@ def update_property(
         )
         db.add(db_event)
 
+    for inst in property.installments:
+        db_inst = Installment(
+            property_id=property_id,
+            name=inst.name,
+            amount=inst.amount,
+            date=parse_date_str(inst.date),
+            paid_by=inst.paid_by,
+            is_interest=int(inst.is_interest),
+            is_completed=int(inst.is_completed),
+        )
+        db.add(db_inst)
+
+    for exp in property.other_expenses or []:
+        db_exp = OtherExpense(
+            property_id=property_id,
+            id=exp.id,
+            name=exp.name,
+            amount=exp.amount,
+            date=parse_date_str(exp.date),
+            paid_by=exp.paid_by,
+            is_completed=int(exp.is_completed),
+        )
+        db.add(db_exp)
+
     db.commit()
     db.refresh(db_property)
 
@@ -480,10 +649,15 @@ def update_property(
         .all()
     )
 
+    db_insts = (
+        db.query(Installment).filter(Installment.property_id == property_id).all()
+    )
+
     return PropertyResponse(
         id=db_property.id,
         name=db_property.name,
         property_type=db_property.property_type,
+        property_status=db_property.property_status,
         purchase_date=db_property.purchase_date,
         possession_date=db_property.possession_date,
         purchase_price=db_property.purchase_price,
@@ -504,6 +678,30 @@ def update_property(
             for cf in db_cfs
         ],
         events=[],
+        installments=[
+            InstallmentCreate(
+                name=inst.name,
+                amount=inst.amount,
+                date=str(inst.date) if inst.date else None,
+                paid_by=inst.paid_by,
+                is_interest=bool(inst.is_interest),
+                is_completed=bool(inst.is_completed),
+            )
+            for inst in db_insts
+        ],
+        other_expenses=[
+            OtherExpenseCreate(
+                id=exp.id,
+                name=exp.name,
+                amount=exp.amount,
+                date=str(exp.date) if exp.date else None,
+                paid_by=exp.paid_by,
+                is_completed=bool(exp.is_completed),
+            )
+            for exp in db.query(OtherExpense)
+            .filter(OtherExpense.property_id == property_id)
+            .all()
+        ],
     )
 
 
@@ -598,3 +796,9 @@ def get_properties(db: Session = Depends(get_db)):
             )
         )
     return result
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

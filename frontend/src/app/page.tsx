@@ -693,6 +693,7 @@ export default function Home() {
 
     let initialLiquidAssets = 0;
     let initialOverdraftAssets = 0;
+    const disbursedAmount: Record<number, number> = {};
     const propertyValuations: Record<number, number> = {};
     const loanBalances: Record<number, number> = {};
     const possessionMonthIndex: Record<number, number> = {};
@@ -717,11 +718,8 @@ export default function Home() {
         const totalDisbursed = (p.installments || []).reduce((sum, inst) =>
           inst.is_completed && inst.paid_by === 'bank' ? sum + inst.amount : sum, 0
         );
-        if (totalDisbursed > 0) {
-          loanBalances[p.id] = totalDisbursed;
-        } else {
-          loanBalances[p.id] = p.loan.principal;
-        }
+        disbursedAmount[p.id] = totalDisbursed;
+        loanBalances[p.id] = totalDisbursed;
 
         if (p.loan.overdraft_account && p.loan.overdraft_account.overdraft_amount > 0) {
           initialOverdraftAssets += p.loan.overdraft_account.overdraft_amount;
@@ -781,7 +779,7 @@ export default function Home() {
           const isPostPossession = i > monthsUntilPossession;
           const isLoanActive = i >= monthsSinceLoanStart && i < monthsSinceLoanStart + p.loan.tenure_months;
 
-          const currentLoanBalance = loanBalances[p.id] || p.loan.principal;
+          const currentLoanBalance = loanBalances[p.id] || disbursedAmount[p.id] || 0;
           const interestRate = p.loan.interest_rate / 100 / 12;
 
           if (isPreEmiPeriod && !isPossessionMonth) {
@@ -835,9 +833,11 @@ export default function Home() {
                 monthlyExpenses += inst.amount;
               }
             } else if (inst.paid_by === 'bank') {
-              if (inst.is_completed && instMonthIndex < (possessionMonthIndex[p.id] ?? Infinity)) {
-                if (loanBalances[p.id] !== undefined) {
-                  loanBalances[p.id] += inst.amount;
+              if (inst.is_completed) {
+                if (instMonthIndex < (possessionMonthIndex[p.id] ?? Infinity)) {
+                  if (loanBalances[p.id] !== undefined) {
+                    loanBalances[p.id] += inst.amount;
+                  }
                 }
               }
             }
