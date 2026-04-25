@@ -189,7 +189,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'add' | 'view'>('view');
   const [editingPropertyId, setEditingPropertyId] = useState<number | null>(null);
-  const [timelineMonths, setTimelineMonths] = useState<12 | 24 | 120 | 240>(120);
+  const [timelineMonths, setTimelineMonths] = useState<number>(120);
+  const [customMonths, setCustomMonths] = useState<string>('120');
+  const [showCustomInput, setShowCustomInput] = useState(false);
   const [excludedPropertyIds, setExcludedPropertyIds] = useState<number[]>([]);
   const [deleteConfirmProperty, setDeleteConfirmProperty] = useState<{id: number; name: string} | null>(null);
   const [otherAssets, setOtherAssets] = useState<OtherAsset[]>([
@@ -205,6 +207,9 @@ export default function Home() {
   ]);
   const [showOtherAssetsModal, setShowOtherAssetsModal] = useState(false);
   const [showInstallmentModal, setShowInstallmentModal] = useState(false);
+  const [showIncomeExpenseModal, setShowIncomeExpenseModal] = useState(false);
+  const [modalIncomes, setModalIncomes] = useState<CashflowRow[]>([]);
+  const [modalExpenses, setModalExpenses] = useState<CashflowRow[]>([]);
 
   useEffect(() => {
     fetchProperties();
@@ -712,56 +717,16 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className="text-2xl font-bold text-gray-900">Financial Monitor</h1>
+          <h1 
+            className="text-2xl font-bold text-gray-900 cursor-pointer hover:text-blue-600"
+            onClick={() => { setActiveTab('view'); setEditingPropertyId(null); }}
+          >
+            Financial Monitor
+          </h1>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 flex gap-2">
-          <button
-            onClick={() => setActiveTab('view')}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'view'
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700 border border-gray-300'
-            }`}
-          >
-            View Dashboard
-          </button>
-          <button
-            onClick={() => {
-              setFormData({
-                ...initialFormData,
-                incomes: [createEmptyCashflowRow()],
-                expenses: [createEmptyCashflowRow()],
-              });
-              setEditingPropertyId(null);
-              setActiveTab('add');
-            }}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              activeTab === 'add' && !editingPropertyId
-                ? 'bg-blue-600 text-white'
-                : 'bg-white text-gray-700 border border-gray-300'
-            }`}
-          >
-            Add Property
-          </button>
-          {editingPropertyId && (
-            <button
-              onClick={() => {
-                setFormData({
-                  ...initialFormData,
-                  incomes: [createEmptyCashflowRow()],
-                  expenses: [createEmptyCashflowRow()],
-                });
-                setEditingPropertyId(null);
-              }}
-              className="px-4 py-2 rounded-lg font-medium bg-gray-200 text-gray-700"
-            >
-              Cancel Edit
-            </button>
-          )}
-        </div>
 
         {activeTab === 'add' ? (
           <div className="bg-white rounded-lg shadow p-6">
@@ -793,7 +758,6 @@ export default function Home() {
                         setFormData({ 
                           ...formData, 
                           property_type: newType,
-                          property_status: newType === 'under_construction' ? 'under_construction' : 'ready_to_move_in'
                         });
                       }}
                       className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
@@ -1119,14 +1083,14 @@ export default function Home() {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity50"
-              >
-                {loading ? 'Saving...' : (editingPropertyId ? 'Update Property' : 'Save Property')}
-              </button>
-              {editingPropertyId && (
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 disabled:opacity50"
+                >
+                  {loading ? 'Saving...' : (editingPropertyId ? 'Update Property' : 'Save Property')}
+                </button>
                 <button
                   type="button"
                   onClick={() => {
@@ -1138,11 +1102,11 @@ export default function Home() {
                     setEditingPropertyId(null);
                     setActiveTab('view');
                   }}
-                  className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 ml-2"
+                  className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400"
                 >
                   Cancel
                 </button>
-              )}
+              </div>
             </form>
           </div>
         ) : (
@@ -1249,32 +1213,28 @@ export default function Home() {
                 <h2 className="text-lg font-semibold">Income & Expenses</h2>
                 <button
                   onClick={() => {
-                    setFormData({
-                      ...initialFormData,
-                      incomes: [createEmptyCashflowRow()],
-                      expenses: [createEmptyCashflowRow()],
-                    });
-                    setEditingPropertyId(null);
-                    setActiveTab('add');
+                    setModalIncomes(properties.length > 0 ? [...formData.incomes] : [createEmptyCashflowRow()]);
+                    setModalExpenses(properties.length > 0 ? [...formData.expenses] : [createEmptyCashflowRow()]);
+                    setShowIncomeExpenseModal(true);
                   }}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
                 >
                   Manage Income & Expenses
                 </button>
               </div>
-              <p className="text-gray-500 text-sm">Add a property to manage its income and expenses.</p>
+              <p className="text-gray-500 text-sm">Manage income and expenses across all properties.</p>
             </div>
 
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-semibold">Assets vs Liabilities Over Time</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   {[12, 24, 120, 240].map((months) => (
                     <button
                       key={months}
-                      onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                      onClick={() => { setTimelineMonths(months); setShowCustomInput(false); }}
                       className={`px-3 py-1 rounded text-sm font-medium ${
-                        timelineMonths === months
+                        timelineMonths === months && !showCustomInput
                           ? 'bg-blue-600 text-white'
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
@@ -1282,6 +1242,40 @@ export default function Home() {
                       {months} months
                     </button>
                   ))}
+                  <button
+                    onClick={() => setShowCustomInput(!showCustomInput)}
+                    className={`px-3 py-1 rounded text-sm font-medium ${
+                      showCustomInput
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Custom
+                  </button>
+                  {showCustomInput && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="600"
+                        value={customMonths}
+                        onChange={(e) => setCustomMonths(e.target.value)}
+                        className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
+                      />
+                      <span className="text-sm text-gray-600">months</span>
+                      <button
+                        onClick={() => {
+                          const months = parseInt(customMonths);
+                          if (months > 0 && months <= 600) {
+                            setTimelineMonths(months);
+                          }
+                        }}
+                        className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="h-80">
@@ -1344,13 +1338,13 @@ export default function Home() {
             <div className="bg-white rounded-lg shadow p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-semibold">Cashflow - Income vs Expenses Over Time</h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
                   {[12, 24, 120, 240].map((months) => (
                     <button
                       key={months}
-                      onClick={() => setTimelineMonths(months as 12 | 24 | 120 | 240)}
+                      onClick={() => { setTimelineMonths(months); setShowCustomInput(false); }}
                       className={`px-3 py-1 rounded text-sm font-medium ${
-                        timelineMonths === months
+                        timelineMonths === months && !showCustomInput
                           ? 'bg-blue-600 text-white'
                           : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                       }`}
@@ -1358,6 +1352,40 @@ export default function Home() {
                       {months} months
                     </button>
                   ))}
+                  <button
+                    onClick={() => setShowCustomInput(!showCustomInput)}
+                    className={`px-3 py-1 rounded text-sm font-medium ${
+                      showCustomInput
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                    }`}
+                  >
+                    Custom
+                  </button>
+                  {showCustomInput && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        max="600"
+                        value={customMonths}
+                        onChange={(e) => setCustomMonths(e.target.value)}
+                        className="w-20 px-2 py-1 text-sm border border-gray-300 rounded"
+                      />
+                      <span className="text-sm text-gray-600">months</span>
+                      <button
+                        onClick={() => {
+                          const months = parseInt(customMonths);
+                          if (months > 0 && months <= 600) {
+                            setTimelineMonths(months);
+                          }
+                        }}
+                        className="px-2 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                      >
+                        Set
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="h-80">
@@ -1628,7 +1656,13 @@ export default function Home() {
                   onClick={() => setShowOtherAssetsModal(false)}
                   className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
                 >
-                  Close
+                  Cancel
+                </button>
+                <button
+                  onClick={() => setShowOtherAssetsModal(false)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save
                 </button>
               </div>
             </div>
@@ -1876,7 +1910,224 @@ export default function Home() {
                   onClick={() => setShowInstallmentModal(false)}
                   className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
                 >
-                  Close & Save
+                  Cancel
+                </button>
+                <button
+                  onClick={() => setShowInstallmentModal(false)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showIncomeExpenseModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-lg p-6 max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+              <h3 className="text-lg font-semibold text-green-600 mb-4">Manage Income & Expenses</h3>
+              <p className="text-sm text-gray-600 mb-4">
+                Add recurring income and expenses with their frequencies. These will be included in the cashflow projections.
+              </p>
+              
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-green-700">Income</h4>
+                  <button
+                    type="button"
+                    onClick={() => setModalIncomes([...modalIncomes, createEmptyCashflowRow()])}
+                    className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                  >
+                    + Add Income
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {modalIncomes.map((inc, index) => (
+                    <div key={inc.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={inc.name}
+                            onChange={(e) => {
+                              const updated = [...modalIncomes];
+                              updated[index].name = e.target.value;
+                              setModalIncomes(updated);
+                            }}
+                            placeholder="e.g., Salary, Rent"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={inc.amount}
+                            onChange={(e) => {
+                              const updated = [...modalIncomes];
+                              updated[index].amount = Number(e.target.value);
+                              setModalIncomes(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Frequency</label>
+                          <select
+                            value={inc.frequency}
+                            onChange={(e) => {
+                              const updated = [...modalIncomes];
+                              updated[index].frequency = e.target.value;
+                              setModalIncomes(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Start Date</label>
+                          <input
+                            type="date"
+                            value={inc.start_date}
+                            onChange={(e) => {
+                              const updated = [...modalIncomes];
+                              updated[index].start_date = e.target.value;
+                              setModalIncomes(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center pt-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = modalIncomes.filter((_, i) => i !== index);
+                              setModalIncomes(updated.length > 0 ? updated : [createEmptyCashflowRow()]);
+                            }}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-medium text-red-700">Expenses</h4>
+                  <button
+                    type="button"
+                    onClick={() => setModalExpenses([...modalExpenses, createEmptyCashflowRow()])}
+                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                  >
+                    + Add Expense
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {modalExpenses.map((exp, index) => (
+                    <div key={exp.id} className="flex gap-3 items-center p-3 border rounded-lg">
+                      <div className="flex-1 grid grid-cols-1 md:grid-cols-5 gap-2">
+                        <div>
+                          <label className="block text-xs text-gray-500">Name</label>
+                          <input
+                            type="text"
+                            value={exp.name}
+                            onChange={(e) => {
+                              const updated = [...modalExpenses];
+                              updated[index].name = e.target.value;
+                              setModalExpenses(updated);
+                            }}
+                            placeholder="e.g., Maintenance, Bills"
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Amount (₹)</label>
+                          <input
+                            type="number"
+                            value={exp.amount}
+                            onChange={(e) => {
+                              const updated = [...modalExpenses];
+                              updated[index].amount = Number(e.target.value);
+                              setModalExpenses(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Frequency</label>
+                          <select
+                            value={exp.frequency}
+                            onChange={(e) => {
+                              const updated = [...modalExpenses];
+                              updated[index].frequency = e.target.value;
+                              setModalExpenses(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          >
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500">Start Date</label>
+                          <input
+                            type="date"
+                            value={exp.start_date}
+                            onChange={(e) => {
+                              const updated = [...modalExpenses];
+                              updated[index].start_date = e.target.value;
+                              setModalExpenses(updated);
+                            }}
+                            className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          />
+                        </div>
+                        <div className="flex items-center justify-center pt-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = modalExpenses.filter((_, i) => i !== index);
+                              setModalExpenses(updated.length > 0 ? updated : [createEmptyCashflowRow()]);
+                            }}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowIncomeExpenseModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setFormData({ ...formData, incomes: modalIncomes, expenses: modalExpenses });
+                    setShowIncomeExpenseModal(false);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                >
+                  Save
                 </button>
               </div>
             </div>
